@@ -1,0 +1,605 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { supabase } from '../supabaseClient';
+import Sidebar from '../components/Sidebar';
+
+/* ───────── Constants ───────── */
+const DAY_NAMES = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const START_HOUR = 9;
+const END_HOUR = 20;
+const ROW_HEIGHT = 56;
+const HEADER_HEIGHT = 72;
+const AVATAR_COLORS = [
+    'bg-emerald-500', 'bg-blue-500', 'bg-violet-500',
+    'bg-amber-500', 'bg-rose-500', 'bg-cyan-500',
+    'bg-indigo-500', 'bg-pink-500',
+];
+
+/* ───────── Helpers ───────── */
+function formatDateFull(d) {
+    return `${DAY_NAMES[d.getDay()]}, ${d.getDate()} de ${MONTH_NAMES[d.getMonth()]}`;
+}
+
+function formatDateInput(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getInitials(name) {
+    if (!name) return '??';
+    const parts = name.split(' ');
+    return parts.length >= 2
+        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+        : name.substring(0, 2).toUpperCase();
+}
+
+function generateTimeSlots(startHour, endHour) {
+    const slots = [];
+    for (let h = startHour; h <= endHour; h++) {
+        slots.push(`${String(h).padStart(2, '0')}:00`);
+        if (h < endHour) slots.push(`${String(h).padStart(2, '0')}:30`);
+    }
+    return slots;
+}
+
+function formatCurrency(v) {
+    return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AGENDA COMPONENT
+   ═══════════════════════════════════════════════════════════════ */
+export default function Agenda() {
+    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [professionals, setProfessionals] = useState([]);
+    const [clients, setClients] = useState([]);
+    const [catalog, setCatalog] = useState([]);       // services + products combined
+    const [barbershopId, setBarbershopId] = useState(null);
+    const [appointments, setAppointments] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    // Modal
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedSlot, setSelectedSlot] = useState({ professionalId: '', time: '' });
+    const [saving, setSaving] = useState(false);
+
+    // Now Line
+    const [currentTime, setCurrentTime] = useState(new Date());
+    const timeSlots = useMemo(() => generateTimeSlots(START_HOUR, END_HOUR), []);
+
+    // ── Fetch master data ──
+    useEffect(() => {
+        async function fetchData() {
+            try {
+                const { data: shop } = await supabase
+                    .from('barbershops')
+                    .select('id')
+                    .eq('name', 'The Barbers Club')
+                    .single();
+
+                if (!shop) { setLoading(false); return; }
+                setBarbershopId(shop.id);
+
+                const [barbersRes, clientsRes, productsRes] = await Promise.all([
+                    supabase.from('profiles').select('id, name')
+                        .eq('barbershop_id', shop.id).eq('role', 'barber').order('name'),
+                    supabase.from('clients').select('id, name, phone')
+                        .eq('barbershop_id', shop.id).order('name'),
+                    supabase.from('products').select('id, name, price')
+                        .eq('barbershop_id', shop.id).order('name'),
+                ]);
+
+                setProfessionals(barbersRes.data || []);
+                setClients(clientsRes.data || []);
+
+                // Build a combined catalog: products become type='product'
+                const productItems = (productsRes.data || []).map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    price: parseFloat(p.price || 0),
+                    type: 'product',
+                }));
+
+                // Try fetching services catalog (may not exist as a table)
+                let serviceItems = [];
+                try {
+                    const { data: svcData } = await supabase
+                        .from('services')
+                        .select('id, name, price')
+                        .eq('barbershop_id', shop.id)
+                        .order('name');
+                    serviceItems = (svcData || []).map(s => ({
+                        id: s.id,
+                        name: s.name,
+                        price: parseFloat(s.price || 0),
+                        type: 'service',
+                    }));
+                } catch (_) {
+                    // services table may not exist
+                }
+
+                setCatalog([...serviceItems, ...productItems]);
+            } catch (_) {
+                // silently handled
+            } finally {
+                setLoading(false);
+            }
+        }
+        fetchData();
+    }, []);
+
+    // ── Fetch day appointments ──
+    const fetchAppointments = useCallback(async () => {
+        if (!barbershopId) return;
+        const dateStr = formatDateInput(selectedDate);
+        const startOfDay = `${dateStr}T00:00:00`;
+        const endOfDay = `${dateStr}T23:59:59.999`;
+
+        const { data } = await supabase
+            .from('orders')
+            .select('id, professional_id, client_id, scheduled_at, total_amount, status')
+            .eq('barbershop_id', barbershopId)
+            .gte('scheduled_at', startOfDay)
+            .lte('scheduled_at', endOfDay)
+            .in('status', ['scheduled', 'confirmed', 'open']);
+
+        setAppointments(data || []);
+    }, [barbershopId, selectedDate]);
+
+    useEffect(() => {
+        if (barbershopId) fetchAppointments();
+    }, [barbershopId, selectedDate, fetchAppointments]);
+
+    // ── Current time ticker ──
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+        return () => clearInterval(timer);
+    }, []);
+
+    // ── Date navigation ──
+    const goToday = () => setSelectedDate(new Date());
+    const goPrev = () => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d); };
+    const goNext = () => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d); };
+
+    const isToday = (() => {
+        const now = new Date();
+        return selectedDate.getFullYear() === now.getFullYear()
+            && selectedDate.getMonth() === now.getMonth()
+            && selectedDate.getDate() === now.getDate();
+    })();
+
+    const nowLineTop = useMemo(() => {
+        const h = currentTime.getHours();
+        const m = currentTime.getMinutes();
+        if (h < START_HOUR || h > END_HOUR) return null;
+        return HEADER_HEIGHT + ((h - START_HOUR) * 60 + m) / 30 * ROW_HEIGHT;
+    }, [currentTime]);
+
+    // ── Appointment placement helpers ──
+    const appointmentsBySlot = useMemo(() => {
+        const map = {};
+        (appointments || []).forEach(a => {
+            if (!a.scheduled_at || !a.professional_id) return;
+            const dt = new Date(a.scheduled_at);
+            const hh = String(dt.getHours()).padStart(2, '0');
+            const mm = dt.getMinutes() < 30 ? '00' : '30';
+            const key = `${hh}:${mm}-${a.professional_id}`;
+            map[key] = a;
+        });
+        return map;
+    }, [appointments]);
+
+    // Client lookup
+    const clientMap = useMemo(() => {
+        const m = {};
+        clients.forEach(c => { m[c.id] = c.name; });
+        return m;
+    }, [clients]);
+
+    // ── Modal handlers ──
+    const openModalEmpty = () => { setSelectedSlot({ professionalId: '', time: '' }); setIsModalOpen(true); };
+    const openModalFromCell = (professionalId, time) => { setSelectedSlot({ professionalId, time }); setIsModalOpen(true); };
+
+    return (
+        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
+            <Sidebar />
+
+            <main className="flex-1 flex flex-col h-full overflow-hidden">
+                {/* ─── HEADER ─── */}
+                <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center justify-between px-8 flex-shrink-0">
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-lg font-semibold text-slate-100">Agenda</h1>
+                        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-slate-700 text-slate-300 text-sm font-semibold rounded-full">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            Gerenciamento de horários
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <div className="hidden md:flex items-center gap-2 bg-slate-700/50 rounded-xl px-4 py-2 text-sm text-slate-400 border border-slate-600">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            Buscar...
+                        </div>
+                        <button className="relative p-2 text-slate-400 hover:text-slate-200 transition-colors">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                            </svg>
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full"></span>
+                        </button>
+                    </div>
+                </header>
+
+                {/* ─── DATE TOOLBAR ─── */}
+                <div className="flex items-center justify-between px-8 py-4 bg-slate-800/50 border-b border-slate-700/50">
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1">
+                            <button onClick={goPrev} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors" title="Dia anterior">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                            </button>
+                            <button onClick={goToday} className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isToday ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Hoje</button>
+                            <button onClick={goNext} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors" title="Próximo dia">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                            </button>
+                        </div>
+                        <h2 className="text-base font-semibold text-slate-100 ml-2">{formatDateFull(selectedDate)}</h2>
+                    </div>
+                    <button onClick={openModalEmpty} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                        Novo Agendamento
+                    </button>
+                </div>
+
+                {/* ─── TIME GRID ─── */}
+                <div className="flex-1 overflow-auto">
+                    {loading ? (
+                        <div className="flex items-center justify-center h-full">
+                            <div className="text-center">
+                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                                <p className="text-slate-500 text-sm">Carregando agenda...</p>
+                            </div>
+                        </div>
+                    ) : professionals.length === 0 ? (
+                        <div className="flex items-center justify-center h-full">
+                            <p className="text-sm text-slate-500">Nenhum profissional cadastrado.</p>
+                        </div>
+                    ) : (
+                        <div className="min-w-max relative">
+                            <div className="grid" style={{ gridTemplateColumns: `72px repeat(${professionals.length}, minmax(180px, 1fr))` }}>
+                                {/* Header row */}
+                                <div className="sticky top-0 z-20 bg-slate-900 border-b border-r border-slate-700 h-[72px]" />
+                                {professionals.map((pro, idx) => (
+                                    <div key={pro.id} className="sticky top-0 z-20 bg-slate-900 border-b border-r border-slate-700/50 h-[72px] flex items-center justify-center gap-3 px-4">
+                                        <div className={`w-10 h-10 ${AVATAR_COLORS[idx % AVATAR_COLORS.length]} rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-lg`}>{getInitials(pro.name)}</div>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-semibold text-slate-100 truncate">{pro.name}</p>
+                                            <p className="text-[11px] text-slate-500">Barbeiro</p>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* Time rows */}
+                                {timeSlots.map((time) => {
+                                    const isFullHour = time.endsWith(':00');
+                                    return (
+                                        <React.Fragment key={time}>
+                                            <div className={`h-14 flex items-start justify-end pr-3 pt-1 border-r border-slate-700 ${isFullHour ? 'border-t border-slate-700/80' : 'border-t border-slate-700/30'}`}>
+                                                {isFullHour && <span className="text-xs font-medium text-slate-500 -mt-0.5">{time}</span>}
+                                            </div>
+
+                                            {professionals.map((pro, colIdx) => {
+                                                const slotKey = `${time}-${pro.id}`;
+                                                const appt = appointmentsBySlot[slotKey];
+
+                                                return (
+                                                    <div
+                                                        key={slotKey}
+                                                        onClick={() => !appt && openModalFromCell(pro.id, time)}
+                                                        className={`h-14 border-r border-slate-700/30 relative transition-all duration-150 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'
+                                                            } ${appt ? '' : 'cursor-pointer group hover:bg-emerald-500/5 hover:border-emerald-500/20'}`}
+                                                        title={appt ? `${clientMap[appt.client_id] || 'Cliente'} — ${formatCurrency(appt.total_amount)}` : `${time} — ${pro.name}`}
+                                                    >
+                                                        {appt ? (
+                                                            <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30`}>
+                                                                <p className="text-xs font-semibold text-slate-100 truncate">{clientMap[appt.client_id] || 'Cliente'}</p>
+                                                                <p className="text-[10px] text-slate-400 truncate">{formatCurrency(appt.total_amount)}</p>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <div className="w-6 h-6 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                                                                    <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Now Line */}
+                            {isToday && nowLineTop !== null && (
+                                <div className="absolute left-[72px] right-0 z-30 pointer-events-none" style={{ top: `${nowLineTop}px` }}>
+                                    <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                                    <div className="h-[2px] bg-emerald-500 w-full shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {/* ═══════ MODAL ═══════ */}
+            {isModalOpen && (
+                <AppointmentModal
+                    professionals={professionals}
+                    clients={clients}
+                    catalog={catalog}
+                    selectedDate={selectedDate}
+                    selectedSlot={selectedSlot}
+                    barbershopId={barbershopId}
+                    saving={saving}
+                    setSaving={setSaving}
+                    onClose={() => setIsModalOpen(false)}
+                    onSaved={() => { setIsModalOpen(false); fetchAppointments(); }}
+                />
+            )}
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   APPOINTMENT MODAL — with Cart System
+   ═══════════════════════════════════════════════════════════════ */
+function AppointmentModal({
+    professionals, clients, catalog, selectedDate, selectedSlot,
+    barbershopId, saving, setSaving, onClose, onSaved,
+}) {
+    const [professionalId, setProfessionalId] = useState(selectedSlot.professionalId || '');
+    const [date, setDate] = useState(formatDateInput(selectedDate));
+    const [time, setTime] = useState(selectedSlot.time || '');
+    const [clientId, setClientId] = useState('');
+    const [clientSearch, setClientSearch] = useState('');
+    const [showClientDropdown, setShowClientDropdown] = useState(false);
+    const [cartItems, setCartItems] = useState([]);
+    const [catalogSelect, setCatalogSelect] = useState('');
+
+    // Client search
+    const filteredClients = useMemo(() => {
+        if (!clientSearch.trim()) return clients.slice(0, 8);
+        const q = clientSearch.toLowerCase();
+        return clients.filter(c => c.name?.toLowerCase().includes(q)).slice(0, 8);
+    }, [clientSearch, clients]);
+
+    // Total
+    const totalAmount = useMemo(() =>
+        cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
+        [cartItems]);
+
+    // Cart operations
+    const addToCart = (catalogId) => {
+        if (!catalogId) return;
+        const item = catalog.find(c => c.id === catalogId);
+        if (!item) return;
+
+        setCartItems(prev => {
+            const exists = prev.find(ci => ci.id === item.id);
+            if (exists) return prev.map(ci => ci.id === item.id ? { ...ci, quantity: ci.quantity + 1 } : ci);
+            return [...prev, { id: item.id, name: item.name, price: item.price, type: item.type, quantity: 1 }];
+        });
+        setCatalogSelect('');
+    };
+
+    const updateQty = (id, delta) => {
+        setCartItems(prev =>
+            prev.map(ci => ci.id === id ? { ...ci, quantity: ci.quantity + delta } : ci)
+                .filter(ci => ci.quantity > 0)
+        );
+    };
+
+    const selectClient = (c) => {
+        setClientId(c.id);
+        setClientSearch(c.name);
+        setShowClientDropdown(false);
+    };
+
+    // ── SAVE to Supabase ──
+    const handleSave = async () => {
+        if (!professionalId || !date || !time || !clientId) {
+            alert('Preencha todos os campos obrigatórios (Profissional, Data, Horário e Cliente).');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const scheduledAt = `${date}T${time}:00`;
+
+            const { data: order, error: orderError } = await supabase
+                .from('orders')
+                .insert({
+                    barbershop_id: barbershopId,
+                    professional_id: professionalId,
+                    client_id: clientId,
+                    scheduled_at: scheduledAt,
+                    total_amount: totalAmount,
+                    status: 'scheduled',
+                    origin: 'reception',
+                })
+                .select('id')
+                .single();
+
+            if (orderError) throw orderError;
+
+            // Insert order_items
+            if (cartItems.length > 0 && order?.id) {
+                const items = cartItems.map(ci => ({
+                    order_id: order.id,
+                    item_type: ci.type,
+                    name: ci.name,
+                    quantity: ci.quantity,
+                    price: ci.price,
+                }));
+
+                const { error: itemsError } = await supabase
+                    .from('order_items')
+                    .insert(items);
+
+                if (itemsError) throw itemsError;
+            }
+
+            onSaved();
+        } catch (err) {
+            alert(`Erro ao salvar: ${err.message}`);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+            <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl shadow-black/40 mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                {/* Title */}
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-emerald-500/15 rounded-xl flex items-center justify-center">
+                            <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-100">Novo Agendamento</h3>
+                            <p className="text-xs text-slate-500">Preencha os dados abaixo</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+
+                <div className="space-y-4">
+                    {/* Professional */}
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Profissional *</label>
+                        <select value={professionalId} onChange={e => setProfessionalId(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer">
+                            <option value="">Selecione o barbeiro</option>
+                            {professionals.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Date + Time */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Data *</label>
+                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Horário *</label>
+                            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                        </div>
+                    </div>
+
+                    {/* Client (searchable combo) */}
+                    <div className="relative">
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Cliente *</label>
+                        <input
+                            type="text"
+                            value={clientSearch}
+                            onChange={e => { setClientSearch(e.target.value); setClientId(''); setShowClientDropdown(true); }}
+                            onFocus={() => setShowClientDropdown(true)}
+                            placeholder="Buscar cliente..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                        />
+                        {clientId && (
+                            <div className="absolute right-3 top-9 text-xs text-emerald-400">✓</div>
+                        )}
+                        {showClientDropdown && filteredClients.length > 0 && !clientId && (
+                            <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl shadow-black/40 max-h-48 overflow-y-auto">
+                                {filteredClients.map(c => (
+                                    <button key={c.id} onClick={() => selectClient(c)} className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors">
+                                        {c.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ── Cart: Add Service/Product ── */}
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Serviços & Produtos</label>
+                        <select
+                            value={catalogSelect}
+                            onChange={e => addToCart(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer"
+                        >
+                            <option value="">Adicionar serviço ou produto...</option>
+                            {catalog.filter(c => c.type === 'service').length > 0 && (
+                                <optgroup label="Serviços">
+                                    {catalog.filter(c => c.type === 'service').map(c => (
+                                        <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
+                                    ))}
+                                </optgroup>
+                            )}
+                            {catalog.filter(c => c.type === 'product').length > 0 && (
+                                <optgroup label="Produtos">
+                                    {catalog.filter(c => c.type === 'product').map(c => (
+                                        <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
+                                    ))}
+                                </optgroup>
+                            )}
+                        </select>
+                    </div>
+
+                    {/* ── Cart Items List ── */}
+                    {cartItems.length > 0 && (
+                        <div className="space-y-2">
+                            {cartItems.map(ci => (
+                                <div key={ci.id} className="flex items-center gap-3 bg-slate-900/60 rounded-xl px-4 py-2.5 border border-slate-700/50">
+                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ci.type === 'service' ? 'bg-blue-400' : 'bg-amber-400'}`} />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-slate-200 truncate">{ci.name}</p>
+                                        <p className="text-[11px] text-slate-500">{formatCurrency(ci.price)} un.</p>
+                                    </div>
+
+                                    {/* Quantity controls */}
+                                    <div className="flex items-center gap-1.5">
+                                        <button
+                                            onClick={() => updateQty(ci.id, -1)}
+                                            className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
+                                        >−</button>
+                                        <span className="w-6 text-center text-sm font-semibold text-slate-100">{ci.quantity}</span>
+                                        <button
+                                            onClick={() => updateQty(ci.id, 1)}
+                                            className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
+                                        >+</button>
+                                    </div>
+
+                                    <p className="text-sm font-semibold text-slate-100 w-24 text-right">{formatCurrency(ci.price * ci.quantity)}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* ── Total ── */}
+                    <div className="flex items-center justify-between pt-2">
+                        <p className="text-sm text-slate-400">Total</p>
+                        <p className="text-lg font-bold text-emerald-400">{formatCurrency(totalAmount)}</p>
+                    </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-3 mt-6 pt-5 border-t border-slate-700">
+                    <button onClick={onClose} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors disabled:opacity-50">
+                        Cancelar
+                    </button>
+                    <button onClick={handleSave} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                        {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                        {saving ? 'Salvando...' : 'Salvar Agendamento'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}

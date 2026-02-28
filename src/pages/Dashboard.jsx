@@ -1,151 +1,495 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
-import KpiCard from '../components/KpiCard';
-import Table from '../components/Table';
+import Drawer, { DrawerTable } from '../components/Drawer';
+import useDashboardData from '../hooks/useDashboardData';
 
+/* ───────── helpers ───────── */
+function formatBRL(v) {
+    return `R$ ${v.toFixed(2).replace('.', ',')}`;
+}
+
+/* ───────── BLOCO 1 : KPI Card (Dark) ───────── */
+function KpiCard({ icon, label, value, sub, badge, badgeColor = 'emerald', progress, onClick }) {
+    const iconBg = {
+        emerald: 'bg-emerald-500/10 text-emerald-400',
+        red: 'bg-red-500/10 text-red-400',
+        blue: 'bg-blue-500/10 text-blue-400',
+        amber: 'bg-amber-500/10 text-amber-400',
+    };
+    return (
+        <div
+            onClick={onClick}
+            className={`bg-slate-800 rounded-2xl border border-slate-700 p-6 flex flex-col justify-between min-h-[160px] transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-slate-700/70 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50' : ''
+                }`}
+        >
+            <div className="flex items-start justify-between">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconBg[badgeColor] || iconBg.emerald}`}>
+                    {icon}
+                </div>
+                {badge && (
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-lg ${badge.startsWith('+') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                        }`}>
+                        {badge}
+                    </span>
+                )}
+            </div>
+            <div className="mt-4">
+                <p className="text-4xl font-bold text-slate-100 tracking-tight">{value}</p>
+                <p className="text-sm text-slate-400 mt-1">{label}</p>
+                {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
+            </div>
+            {progress !== undefined && (
+                <div className="mt-3">
+                    <div className="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div
+                            className="h-full rounded-full bg-emerald-500 transition-all duration-700"
+                            style={{ width: `${Math.min(progress, 100)}%` }}
+                        />
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1 text-right">{progress.toFixed(0)}%</p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ───────── BLOCO 2 : Mini card (Dark) ───────── */
+function MiniCard({ icon, label, value, color = 'gray', onClick }) {
+    const iconColors = {
+        emerald: 'text-emerald-400',
+        red: 'text-red-400',
+        amber: 'text-amber-400',
+        blue: 'text-blue-400',
+        gray: 'text-slate-400',
+    };
+    return (
+        <div
+            onClick={onClick}
+            className={`bg-slate-800 rounded-xl border border-slate-700 px-4 py-3 flex items-center gap-3 transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-slate-700/70 hover:border-slate-600' : ''
+                }`}
+        >
+            <div className={`${iconColors[color]}`}>{icon}</div>
+            <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-400">{label}</p>
+                <p className="text-lg font-bold text-slate-100">{value}</p>
+            </div>
+        </div>
+    );
+}
+
+/* ───────── BLOCO 4 : Alert card (Dark + Clickable) ───────── */
+function AlertCard({ icon, label, count, onClick }) {
+    return (
+        <button
+            onClick={onClick}
+            className="flex-1 bg-slate-800 rounded-2xl border border-slate-700 px-5 py-4 flex items-center gap-4 cursor-pointer hover:bg-slate-700/70 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50 transition-all duration-200 text-left"
+        >
+            <div className="w-10 h-10 bg-red-500/10 rounded-xl flex items-center justify-center text-red-400 flex-shrink-0">
+                {icon}
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-sm text-slate-400">{label}</p>
+            </div>
+            <span className="bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full min-w-[28px] text-center">
+                {count}
+            </span>
+        </button>
+    );
+}
+
+/* ───────── CHART MODAL (Zoom) ───────── */
+function ChartModal({ open, onClose, data, maxRevenue }) {
+    if (!open) return null;
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={onClose}
+        >
+            <div
+                className="w-full max-w-4xl bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-2xl relative"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Close button */}
+                <button
+                    onClick={onClose}
+                    className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+
+                <div className="mb-6">
+                    <h2 className="text-xl font-bold text-slate-100">Faturamento — 7 dias</h2>
+                    <p className="text-sm text-slate-400 mt-1">
+                        Total da semana: <span className="text-emerald-400 font-semibold">{formatBRL(data.reduce((s, d) => s + d.value, 0))}</span>
+                    </p>
+                </div>
+
+                <div className="flex items-end justify-between gap-4 h-96">
+                    {data.map((d, i) => (
+                        <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-2">
+                            <span className="text-sm text-slate-300 font-semibold">{formatBRL(d.value)}</span>
+                            <div
+                                className={`w-full rounded-xl transition-all duration-500 ${d.day === 'Hoje' ? 'bg-emerald-500' : 'bg-emerald-500/25'
+                                    }`}
+                                style={{ height: `${(d.value / maxRevenue) * 100}%`, minHeight: '12px' }}
+                            />
+                            <span className="text-sm text-slate-400 font-medium">{d.day}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════ */
+/* DASHBOARD PRINCIPAL (DARK MODE PREMIUM)    */
+/* ═══════════════════════════════════════════ */
 export default function Dashboard() {
-    // Mocks de Dados para as Tabelas
-    const topClientesData = [
-        { nome: "Cliente avulso", servicos: 2, produtos: 0, assinatura: "Não", total: "R$ 60,00" },
-        { nome: "José Roberto", servicos: 5, produtos: 1, assinatura: "Sim", total: "R$ 250,00" },
-        { nome: "Laercio de Almeida", servicos: 4, produtos: 2, assinatura: "Não", total: "R$ 180,00" },
-        { nome: "Igor Santos", servicos: 3, produtos: 0, assinatura: "Sim", total: "R$ 120,00" },
-        { nome: "Fabio Andre", servicos: 1, produtos: 3, assinatura: "Não", total: "R$ 210,00" },
-    ];
+    const { loading, data } = useDashboardData();
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const [drawerType, setDrawerType] = useState(null);
+    const [isChartModalOpen, setIsChartModalOpen] = useState(false);
 
-    const estoqueData = [
-        { produto: "Pomada Coffe", min: 10, atual: 5, filial: "Matriz" },
-        { produto: "Pomada Toque Seco", min: 15, atual: 2, filial: "Matriz" },
-        { produto: "Pomada Black", min: 5, atual: 0, filial: "Filial Sul" },
-        { produto: "Pomada Orange", min: 10, atual: 8, filial: "Matriz" },
-        { produto: "Pomada Premium", min: 5, atual: 1, filial: "Filial Norte" },
-    ];
+    function openDrawer(type) {
+        setDrawerType(type);
+        setDrawerOpen(true);
+    }
 
-    const pagamentosIncompletosData = [
-        { nome: "Carlos Eduardo", plano: "Plano Ouro", status: "Pendente" },
-        { nome: "Marcos Silva", plano: "Plano Prata", status: "Atrasado" },
-    ];
+    // Dynamic 7-day revenue from Supabase
+    const last7Days = data?.faturamento7Dias || [];
 
-    const aniversariantesData = [
-        { nome: "João Pedro", data: "12/05" },
-        { nome: "Rafael Costa", data: "15/05" },
-    ];
+    const maxRevenue = useMemo(() => Math.max(...last7Days.map(d => d.value), 1), [last7Days]);
 
-    const recompraData = [
-        { nome: "André Luiz", produto: "Óleo para Barba", data: "10/03/2023" },
-        { nome: "Thiago Mendes", produto: "Shampoo Anticaspa", data: "05/04/2023" },
-    ];
+    // Meta do mês
+    const metaMes = 10000;
+    const faturamentoMes = data?.kpis?.faturamentoMes || 0;
+    const metaPercent = metaMes > 0 ? (faturamentoMes / metaMes) * 100 : 0;
+
+    // Conversão com números brutos
+    const conversao = data?.funnel?.conversao || '0.0';
+    const funnelTotal = data?.funnel?.total || 0;
+    const funnelClosed = data?.funnel?.closed || 0;
+
+    // Drawer content (alerts + KPI drill-down)
+    const drawerConfig = useMemo(() => {
+        if (!data) return {};
+        return {
+            estoque: {
+                title: 'Estoque Crítico',
+                columns: ['Produto', 'Estoque Atual', 'Mínimo'],
+                data: (data.estoqueData || []).map(p => ({
+                    produto: p.produto,
+                    estoque: p.atual,
+                    minimo: p.min,
+                })),
+            },
+            contratos: {
+                title: 'Contratos Vencendo',
+                columns: ['Cliente', 'Plano', 'Vence em'],
+                data: data.contratosVencendo || [],
+            },
+            pagamentos: {
+                title: 'Pagamentos Pendentes',
+                columns: ['Cliente', 'Plano', 'Status'],
+                data: (data.pagamentosIncompletos || []).map(p => ({
+                    nome: p.nome || p.name || 'Sem nome',
+                    plano: p.plano || p.plan || '—',
+                    status: p.status || 'Pendente',
+                })),
+            },
+            // KPI drill-downs
+            faturamentoHoje: {
+                title: 'Faturamento Hoje — Detalhes',
+                columns: ['Hora', 'Cliente', 'Barbeiro', 'Valor'],
+                data: data.detalheFaturamentoHoje || [],
+            },
+            comandasAbertas: {
+                title: 'Comandas Abertas — Detalhes',
+                columns: ['Hora Abertura', 'Cliente', 'Barbeiro', 'Valor Atual'],
+                data: data.detalheComandasAbertas || [],
+            },
+            conversaoMes: {
+                title: 'Agendamentos do Mês',
+                columns: ['Data/Hora', 'Cliente', 'Barbeiro', 'Status', 'Valor'],
+                data: data.detalheConversaoMes || [],
+            },
+            metaMes: {
+                title: 'Faturamento do Mês Atual',
+                columns: ['Dia', 'Faturamento'],
+                data: data.detalheMetaMes || [],
+            },
+            aniversariantesSemana: {
+                title: 'Aniversariantes da Semana',
+                columns: ['Cliente', 'Aniversário', 'Ação'],
+                data: data.aniversariantesSemana || [],
+            },
+        };
+    }, [data]);
+
+    const currentDrawer = drawerConfig[drawerType] || {};
+
+    if (loading) {
+        return (
+            <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
+                <Sidebar />
+                <main className="flex-1 flex flex-col h-full overflow-hidden">
+                    <Header />
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                            <p className="text-slate-500 text-sm">Carregando dashboard...</p>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        );
+    }
+
+    if (!data) {
+        return (
+            <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
+                <Sidebar />
+                <main className="flex-1 flex flex-col h-full overflow-hidden">
+                    <Header />
+                    <div className="flex-1 flex items-center justify-center">
+                        <p className="text-red-400 text-sm">Erro ao carregar dados.</p>
+                    </div>
+                </main>
+            </div>
+        );
+    }
 
     return (
-        <div className="flex h-screen bg-gray-100 overflow-hidden font-sans">
+        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
             <Sidebar />
 
             <main className="flex-1 flex flex-col h-full overflow-hidden">
-                <Header />
+                <Header userName={data.adminName} totalClientes={data.kpis.clients} totalAssinantes={data.kpis.activeSubsCount} />
 
-                {/* Área de conteúdo scrollável */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
 
-                    {/* SEÇÃO 1 — BANNER */}
-                    <section className="h-[180px] bg-gray-200 rounded-lg w-full flex items-center justify-center text-gray-400">
-                        [Espaço para Imagem / Banner]
+                    {/* ─── BLOCO 1 : KPIs PRINCIPAIS (Clickable → Drawer) ─── */}
+                    <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+                        <KpiCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V7m0 10v1" /></svg>}
+                            value={formatBRL(data.kpis.faturamentoDia)}
+                            label="Faturamento Hoje"
+                            badge="+12% vs ontem"
+                            badgeColor="emerald"
+                            onClick={() => openDrawer('faturamentoHoje')}
+                        />
+                        <KpiCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
+                            value={data.kpis.openOrders + 1}
+                            label="Atendimentos Hoje"
+                            sub={`${data.kpis.openOrders + 1} de ${funnelTotal || (data.kpis.openOrders + 1)} agendados`}
+                            badgeColor="blue"
+                        />
+                        <KpiCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
+                            value={`${conversao}%`}
+                            label="Conversão do Mês"
+                            sub={`${funnelClosed} de ${funnelTotal} agendados`}
+                            badgeColor="amber"
+                            progress={parseFloat(conversao)}
+                            onClick={() => openDrawer('conversaoMes')}
+                        />
+                        <KpiCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
+                            value={formatBRL(faturamentoMes)}
+                            label="Meta do Mês"
+                            sub={`Meta: ${formatBRL(metaMes)}`}
+                            badgeColor="emerald"
+                            progress={metaPercent}
+                            onClick={() => openDrawer('metaMes')}
+                        />
                     </section>
 
-                    {/* SEÇÃO 2 — TEXTO ABAIXO DO BANNER */}
-                    <section className="h-[60px] bg-white border border-gray-200 rounded-lg flex items-center justify-center">
-                        <h1 className="text-xl font-bold text-gray-800">The Barbers Club</h1>
+                    {/* ─── BLOCO 2 : ORIGEM + PRÓXIMOS ATENDIMENTOS + RESUMO ─── */}
+                    <section className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+                        {/* Esquerda 60% - dois cards empilhados */}
+                        <div className="lg:col-span-3 flex flex-col gap-5">
+                            {/* Card A: Origem dos Agendamentos */}
+                            <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
+                                <h2 className="text-base font-semibold text-slate-100 mb-5">Origem dos Agendamentos</h2>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="text-center">
+                                        <p className="text-3xl font-bold text-slate-100">{data.origins.total}</p>
+                                        <p className="text-xs text-slate-400 mt-1">Total</p>
+                                    </div>
+                                    <div className="text-center border-l border-r border-slate-700">
+                                        <p className="text-3xl font-bold text-emerald-400">{data.origins.app}</p>
+                                        <p className="text-xs text-slate-400 mt-1">App <span className="text-emerald-400 font-medium">({data.origins.appPercent}%)</span></p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-3xl font-bold text-blue-400">{data.origins.reception}</p>
+                                        <p className="text-xs text-slate-400 mt-1">Recepção <span className="text-blue-400 font-medium">({data.origins.receptionPercent}%)</span></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Card B: Próximos Atendimentos da Equipe */}
+                            <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
+                                <h2 className="text-base font-semibold text-slate-100 mb-4">Próximos Atendimentos</h2>
+                                {(data.proximosAtendimentos || []).length === 0 ? (
+                                    <p className="text-sm text-slate-500">Nenhum agendamento próximo.</p>
+                                ) : (
+                                    <div className="flex flex-col gap-2">
+                                        {data.proximosAtendimentos.map((pro, i) => (
+                                            <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700 transition-colors">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="w-9 h-9 bg-emerald-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                                        {pro.initials}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-medium text-slate-200 truncate">{pro.nome}</p>
+                                                        <p className="text-xs text-slate-500 truncate">{pro.cliente}</p>
+                                                    </div>
+                                                </div>
+                                                <span className="text-sm font-bold text-slate-200 bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-600 flex-shrink-0 ml-3">
+                                                    {pro.hora}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Direita 40% - Resumo rápido */}
+                        <div className="lg:col-span-2 flex flex-col gap-3">
+                            <MiniCard
+                                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+                                label="Comandas abertas"
+                                value={data.kpis.openOrders}
+                                color="emerald"
+                                onClick={() => openDrawer('comandasAbertas')}
+                            />
+                            <MiniCard
+                                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                                label="Próximo horário livre"
+                                value="11:00"
+                                color="emerald"
+                            />
+                            <MiniCard
+                                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>}
+                                label="No-shows hoje"
+                                value={data.funnel?.noShowCount || 0}
+                                color="red"
+                            />
+                            <MiniCard
+                                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>}
+                                label="Cancelamentos hoje"
+                                value={data.funnel?.canceledCount || 0}
+                                color="amber"
+                            />
+                            <MiniCard
+                                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 15.546c-.523 0-1.046.151-1.5.454a2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0A1.5 1.5 0 003 17.25v.878A2.25 2.25 0 005.25 20.25h13.5A2.25 2.25 0 0021 18.128v-.582zM21 15.546V9a3 3 0 00-3-3h-1.172a3 3 0 01-2.121-.879l-.83-.828A1 1 0 0013.172 4H10.83a1 1 0 00-.707.293l-.83.828A3 3 0 017.172 6H6a3 3 0 00-3 3v6.546" /></svg>}
+                                label="Aniversariantes da semana"
+                                value={data.aniversariantesSemana?.length || 0}
+                                color="blue"
+                                onClick={() => openDrawer('aniversariantesSemana')}
+                            />
+                        </div>
                     </section>
 
-                    {/* SEÇÃO 3 — VISÃO GERAL (CARDS DE KPI) */}
-                    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <KpiCard title="Profissionais cadastrados" value="2" />
-                        <KpiCard title="Comandas abertas" value="40" />
-                        <KpiCard title="Clientes" value="411" />
-                        <KpiCard title="Erros de pré aprovação de planos" value="0" />
-                    </section>
+                    {/* ─── BLOCO 3 : PERFORMANCE FINANCEIRA ─── */}
+                    <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                        {/* Faturamento 7 dias (Clickable → Modal) */}
+                        <div
+                            className="bg-slate-800 rounded-2xl border border-slate-700 p-6 cursor-pointer hover:bg-slate-700/70 hover:border-slate-600 transition-all duration-200"
+                            onClick={() => setIsChartModalOpen(true)}
+                        >
+                            <div className="flex items-center justify-between mb-5">
+                                <div>
+                                    <h2 className="text-base font-semibold text-slate-100">Faturamento — 7 dias</h2>
+                                    <p className="text-xs text-slate-500 mt-0.5">Visão semanal • Clique para expandir</p>
+                                </div>
+                                <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400">
+                                    {formatBRL(last7Days.reduce((s, d) => s + d.value, 0))}
+                                </span>
+                            </div>
+                            <div className="flex items-end justify-between gap-2 h-[140px]">
+                                {last7Days.map((d, i) => (
+                                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-1">
+                                        <span className="text-[10px] text-slate-500 font-medium">{formatBRL(d.value)}</span>
+                                        <div
+                                            className={`w-full rounded-lg transition-all duration-500 ${d.day === 'Hoje' ? 'bg-emerald-500' : 'bg-emerald-500/20'
+                                                }`}
+                                            style={{ height: `${(d.value / maxRevenue) * 100}%`, minHeight: '8px' }}
+                                        />
+                                        <span className="text-[11px] text-slate-500 font-medium">{d.day}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
 
-                    {/* SEÇÃO 4 — ORIGEM DE AGENDAMENTOS */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Origem de Agendamentos</h2>
-                        <div className="bg-white p-5 border border-gray-200 rounded-lg grid grid-cols-3 gap-4 text-center">
+                        {/* Ticket Médio */}
+                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6 flex flex-col justify-between">
                             <div>
-                                <p className="text-sm text-gray-500">Total</p>
-                                <p className="text-2xl font-bold text-gray-800">397</p>
+                                <h2 className="text-base font-semibold text-slate-100">Ticket Médio</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">Média por comanda fechada</p>
                             </div>
-                            <div className="border-l border-gray-200">
-                                <p className="text-sm text-gray-500">App</p>
-                                <p className="text-2xl font-bold text-blue-600">65 <span className="text-sm text-gray-400">(16.37%)</span></p>
+                            <div className="my-6">
+                                <p className="text-5xl font-bold text-slate-100 tracking-tight">{formatBRL(data.kpis.ticketMedio)}</p>
                             </div>
-                            <div className="border-l border-gray-200">
-                                <p className="text-sm text-gray-500">Recepção</p>
-                                <p className="text-2xl font-bold text-green-600">332 <span className="text-sm text-gray-400">(83.63%)</span></p>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* SEÇÃO 5 — CONTRATOS */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Contratos</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-white p-5 border border-gray-200 rounded-lg flex justify-between items-center">
-                                <span className="font-medium text-gray-600">Contratos a vencer</span>
-                                <span className="text-2xl font-bold text-gray-800">0</span>
-                            </div>
-                            <div className="bg-white p-5 border border-gray-200 rounded-lg flex justify-between items-center">
-                                <span className="font-medium text-gray-600">Contratos pendentes</span>
-                                <span className="text-2xl font-bold text-red-500">4</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-red-500/10 text-red-400">
+                                    -5% vs mês anterior
+                                </span>
+                                <span className="text-xs text-slate-500">Simulado</span>
                             </div>
                         </div>
                     </section>
 
-                    {/* SEÇÃO 6 — CLIENTES QUE MAIS COMPRAM */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Clientes que mais compram</h2>
-                        <Table
-                            columns={['Nome', 'Serviços', 'Produtos', 'Assinatura', 'Total']}
-                            data={topClientesData}
+                    {/* ─── BLOCO 4 : ALERTAS OPERACIONAIS (Clickable → Drawer) ─── */}
+                    <section className="flex flex-col sm:flex-row gap-5">
+                        <AlertCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>}
+                            label="Estoque crítico"
+                            count={data.estoqueData?.length || 0}
+                            onClick={() => openDrawer('estoque')}
                         />
-                    </section>
-
-                    {/* SEÇÃO 7 — PRODUTOS COM ESTOQUE MÍNIMO */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Produtos com estoque mínimo</h2>
-                        <Table
-                            columns={['Produto', 'Estoque mínimo', 'Estoque atual', 'Filial']}
-                            data={estoqueData}
+                        <AlertCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+                            label="Contratos vencendo"
+                            count={data.contracts?.expiring || 0}
+                            onClick={() => openDrawer('contratos')}
                         />
-                    </section>
-
-                    {/* SEÇÃO 8 — CLIENTES COM PAGAMENTO INCOMPLETO */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Clientes com pagamento incompleto</h2>
-                        <Table
-                            columns={['Nome', 'Plano', 'Status']}
-                            data={pagamentosIncompletosData}
-                        />
-                    </section>
-
-                    {/* SEÇÃO 9 — ANIVERSARIANTES DA SEMANA */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Aniversariantes da semana</h2>
-                        <Table
-                            columns={['Nome', 'Data nascimento']}
-                            data={aniversariantesData}
-                        />
-                    </section>
-
-                    {/* SEÇÃO 10 — CLIENTES PARA RECOMPRA */}
-                    <section>
-                        <h2 className="text-lg font-bold mb-3 text-gray-700">Clientes para recompra</h2>
-                        <Table
-                            columns={['Nome', 'Produto', 'Data última compra']}
-                            data={recompraData}
+                        <AlertCard
+                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.001c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001C2.57 17.334 3.532 19 5.072 19z" /></svg>}
+                            label="Pagamentos pendentes"
+                            count={data.contracts?.pending || 0}
+                            onClick={() => openDrawer('pagamentos')}
                         />
                     </section>
 
                 </div>
             </main>
+
+            {/* ─── GAVETA LATERAL (Dark) ─── */}
+            <Drawer
+                open={drawerOpen}
+                onClose={() => setDrawerOpen(false)}
+                title={currentDrawer.title || ''}
+            >
+                <DrawerTable
+                    columns={currentDrawer.columns || []}
+                    data={currentDrawer.data || []}
+                />
+            </Drawer>
+
+            {/* ─── MODAL ZOOM GRÁFICO ─── */}
+            <ChartModal
+                open={isChartModalOpen}
+                onClose={() => setIsChartModalOpen(false)}
+                data={last7Days}
+                maxRevenue={maxRevenue}
+            />
         </div>
     );
 }
