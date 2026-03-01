@@ -6,8 +6,6 @@ import Sidebar from '../components/Sidebar';
 /* ───────── Constants ───────── */
 const DAY_NAMES = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-const START_HOUR = 9;
-const END_HOUR = 20;
 const ROW_HEIGHT = 56;
 const HEADER_HEIGHT = 72;
 const AVATAR_COLORS = [
@@ -33,11 +31,14 @@ function getInitials(name) {
         : name.substring(0, 2).toUpperCase();
 }
 
-function generateTimeSlots(startHour, endHour) {
+function generateTimeSlots(startHour, endHour, startMin = 0, endMin = 0) {
     const slots = [];
     for (let h = startHour; h <= endHour; h++) {
-        slots.push(`${String(h).padStart(2, '0')}:00`);
-        if (h < endHour) slots.push(`${String(h).padStart(2, '0')}:30`);
+        const minStart = (h === startHour) ? startMin : 0;
+        const minEnd = (h === endHour) ? endMin : 59;
+        if (minStart <= 0 && minEnd >= 0) slots.push(`${String(h).padStart(2, '0')}:00`);
+        if (minStart <= 30 && minEnd >= 30 && h < endHour) slots.push(`${String(h).padStart(2, '0')}:30`);
+        if (h === endHour && minEnd >= 30) slots.push(`${String(h).padStart(2, '0')}:30`);
     }
     return slots;
 }
@@ -78,7 +79,32 @@ export default function Agenda() {
 
     // Now Line
     const [currentTime, setCurrentTime] = useState(new Date());
-    const timeSlots = useMemo(() => generateTimeSlots(START_HOUR, END_HOUR), []);
+    const [businessHours, setBusinessHours] = useState([]);
+
+    // Dynamic day config based on selected date
+    const dayConfig = useMemo(() => {
+        const dow = selectedDate.getDay(); // 0=Sun ... 6=Sat
+        const found = businessHours.find(h => h.day_of_week === dow);
+        if (!found) return { is_closed: false, open_time: '09:00', close_time: '20:00' };
+        return found;
+    }, [selectedDate, businessHours]);
+
+    const dynamicStartHour = useMemo(() => {
+        if (dayConfig.is_closed) return 9;
+        const [h] = (dayConfig.open_time || '09:00').split(':').map(Number);
+        return h;
+    }, [dayConfig]);
+
+    const dynamicEndHour = useMemo(() => {
+        if (dayConfig.is_closed) return 20;
+        const [h] = (dayConfig.close_time || '20:00').split(':').map(Number);
+        return h;
+    }, [dayConfig]);
+
+    const timeSlots = useMemo(() => {
+        if (dayConfig.is_closed) return [];
+        return generateTimeSlots(dynamicStartHour, dynamicEndHour);
+    }, [dayConfig, dynamicStartHour, dynamicEndHour]);
 
     // ── Fetch master data ──
     useEffect(() => {
@@ -87,18 +113,18 @@ export default function Agenda() {
                 const { data: shop } = await supabase
                     .from('barbershops')
                     .select('id')
-                    .eq('name', 'The Barbers Club')
+                    .limit(1)
                     .single();
 
                 if (!shop) { setLoading(false); return; }
                 setBarbershopId(shop.id);
 
                 const [barbersRes, clientsRes, productsRes] = await Promise.all([
-                    supabase.from('profiles').select('id, name')
+                    supabase.from('profiles').select('id, name, role')
                         .eq('barbershop_id', shop.id).eq('role', 'barber').order('name'),
                     supabase.from('clients').select('id, name, phone')
                         .eq('barbershop_id', shop.id).order('name'),
-                    supabase.from('products').select('id, name, price')
+                    supabase.from('products').select('id, name, price, current_stock')
                         .eq('barbershop_id', shop.id).order('name'),
                 ]);
 
@@ -111,6 +137,7 @@ export default function Agenda() {
                     name: p.name,
                     price: parseFloat(p.price || 0),
                     type: 'product',
+                    current_stock: p.current_stock ?? 0,
                 }));
 
                 // Try fetching services catalog (may not exist as a table)
@@ -132,6 +159,18 @@ export default function Agenda() {
                 }
 
                 setCatalog([...serviceItems, ...productItems]);
+
+                // Business hours
+                try {
+                    const { data: bhData } = await supabase
+                        .from('business_hours')
+                        .select('*')
+                        .eq('barbershop_id', shop.id)
+                        .order('day_of_week');
+                    setBusinessHours(bhData || []);
+                } catch (_) {
+                    // business_hours table may not exist yet
+                }
             } catch (_) {
                 // silently handled
             } finally {
@@ -188,9 +227,9 @@ export default function Agenda() {
     const nowLineTop = useMemo(() => {
         const h = currentTime.getHours();
         const m = currentTime.getMinutes();
-        if (h < START_HOUR || h > END_HOUR) return null;
-        return HEADER_HEIGHT + ((h - START_HOUR) * 60 + m) / 30 * ROW_HEIGHT;
-    }, [currentTime]);
+        if (dayConfig.is_closed || h < dynamicStartHour || h > dynamicEndHour) return null;
+        return HEADER_HEIGHT + ((h - dynamicStartHour) * 60 + m) / 30 * ROW_HEIGHT;
+    }, [currentTime, dayConfig, dynamicStartHour, dynamicEndHour]);
 
     // ── Appointment placement helpers ──
     const appointmentsBySlot = useMemo(() => {
@@ -283,6 +322,19 @@ export default function Agenda() {
                     ) : professionals.length === 0 ? (
                         <div className="flex items-center justify-center h-full">
                             <p className="text-sm text-slate-500">Nenhum profissional cadastrado.</p>
+                        </div>
+                    ) : dayConfig.is_closed ? (
+                        <div className="flex items-center justify-center h-full">
+                            <div className="text-center">
+                                <div className="w-20 h-20 bg-rose-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                    <svg className="w-10 h-10 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-lg font-semibold text-slate-200 mb-1">Estabelecimento Fechado</h3>
+                                <p className="text-sm text-slate-500">Não há horários disponíveis para {DAY_NAMES[selectedDate.getDay()]}.</p>
+                                <p className="text-xs text-slate-600 mt-2">Configure os horários em Configurações → Horários</p>
+                            </div>
                         </div>
                     ) : (
                         <div className="min-w-max relative">
@@ -445,6 +497,22 @@ function AppointmentModal({
         const item = catalog.find(c => c.id === catalogId);
         if (!item) return;
 
+        // Stock validation for products
+        if (item.type === 'product') {
+            if ((item.current_stock ?? 0) <= 0) {
+                alert('Produto esgotado! Não é possível adicionar.');
+                setCatalogSelect('');
+                return;
+            }
+            const existingInCart = cartItems.find(ci => ci.id === item.id);
+            const currentQtyInCart = existingInCart ? existingInCart.quantity : 0;
+            if (currentQtyInCart + 1 > item.current_stock) {
+                alert(`Estoque insuficiente. Apenas ${item.current_stock} unidades disponíveis de "${item.name}".`);
+                setCatalogSelect('');
+                return;
+            }
+        }
+
         setCartItems(prev => {
             const exists = prev.find(ci => ci.id === item.id);
             if (exists) return prev.map(ci => ci.id === item.id ? { ...ci, quantity: ci.quantity + 1 } : ci);
@@ -455,8 +523,22 @@ function AppointmentModal({
 
     const updateQty = (id, delta) => {
         setCartItems(prev =>
-            prev.map(ci => ci.id === id ? { ...ci, quantity: ci.quantity + delta } : ci)
-                .filter(ci => ci.quantity > 0)
+            prev.map(ci => {
+                if (ci.id !== id) return ci;
+                const newQty = ci.quantity + delta;
+                if (newQty <= 0) return { ...ci, quantity: 0 };
+
+                // Stock validation for product increment
+                if (delta > 0 && ci.type === 'product') {
+                    const catItem = catalog.find(c => c.id === ci.id);
+                    if (catItem && newQty > (catItem.current_stock ?? 0)) {
+                        alert(`Estoque insuficiente. Apenas ${catItem.current_stock} unidades disponíveis de "${ci.name}".`);
+                        return ci;
+                    }
+                }
+
+                return { ...ci, quantity: newQty };
+            }).filter(ci => ci.quantity > 0)
         );
     };
 
@@ -682,9 +764,14 @@ function AppointmentModal({
                                     )}
                                     {catalog.filter(c => c.type === 'product').length > 0 && (
                                         <optgroup label="Produtos">
-                                            {catalog.filter(c => c.type === 'product').map(c => (
-                                                <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
-                                            ))}
+                                            {catalog.filter(c => c.type === 'product').map(c => {
+                                                const isOut = (c.current_stock ?? 0) <= 0;
+                                                return (
+                                                    <option key={c.id} value={c.id} disabled={isOut}>
+                                                        {c.name} — {formatCurrency(c.price)}{isOut ? ' [ESGOTADO]' : c.current_stock <= 5 ? ` (${c.current_stock} un.)` : ''}
+                                                    </option>
+                                                );
+                                            })}
                                         </optgroup>
                                     )}
                                 </select>

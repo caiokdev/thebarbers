@@ -197,11 +197,8 @@ export default function Dashboard() {
             },
             pagamentos: {
                 title: 'Pagamentos Pendentes',
-                columns: ['Cliente', 'Status'],
-                data: (data.pagamentosIncompletos || []).map(p => ({
-                    nome: p.nome || p.name || 'Sem nome',
-                    status: 'Atrasado',
-                })),
+                columns: ['Cliente', 'Telefone', 'Status'],
+                data: data.clientesInadimplentes || [],
             },
             // KPI drill-downs
             faturamentoHoje: {
@@ -467,7 +464,7 @@ export default function Dashboard() {
                         <AlertCard
                             icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.001c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001C2.57 17.334 3.532 19 5.072 19z" /></svg>}
                             label="Pagamentos pendentes"
-                            count={data.contracts?.pending || 0}
+                            count={data.clientesInadimplentes?.length || 0}
                             onClick={() => openDrawer('pagamentos')}
                         />
                     </section>

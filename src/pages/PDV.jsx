@@ -60,7 +60,7 @@ export default function PDV() {
             const bId = order.barbershop_id;
 
             const [productsRes] = await Promise.all([
-                supabase.from('products').select('id, name, price')
+                supabase.from('products').select('id, name, price, current_stock')
                     .eq('barbershop_id', bId).order('name'),
             ]);
 
@@ -69,6 +69,7 @@ export default function PDV() {
                 name: p.name,
                 price: parseFloat(p.price || 0),
                 item_type: 'product',
+                current_stock: p.current_stock ?? 0,
             }));
 
             let serviceItems = [];
@@ -106,6 +107,23 @@ export default function PDV() {
 
     // ── Add item from catalog ──
     function addItem(catalogItem) {
+        // Stock validation for products
+        if (catalogItem.item_type === 'product') {
+            if ((catalogItem.current_stock ?? 0) <= 0) {
+                alert('Produto esgotado! Não é possível adicionar ao carrinho.');
+                return;
+            }
+            // Check if adding 1 more exceeds stock
+            const existingInCart = comandaItems.find(ci =>
+                ci.name === catalogItem.name && ci.item_type === 'product'
+            );
+            const currentQtyInCart = existingInCart ? existingInCart.quantity : 0;
+            if (currentQtyInCart + 1 > catalogItem.current_stock) {
+                alert(`Estoque insuficiente. Apenas ${catalogItem.current_stock} unidades disponíveis.`);
+                return;
+            }
+        }
+
         // Check if already in cart
         const existing = comandaItems.find(ci =>
             ci.name === catalogItem.name && ci.item_type === catalogItem.item_type
@@ -123,6 +141,7 @@ export default function PDV() {
                 price: catalogItem.price,
                 quantity: 1,
                 item_type: catalogItem.item_type,
+                catalogId: catalogItem.catalogId,
             }]);
         }
         setCatalogSearch('');
@@ -139,7 +158,18 @@ export default function PDV() {
         setComandaItems(prev => prev.map(ci => {
             if (ci._localId !== localId) return ci;
             const newQty = ci.quantity + delta;
-            return newQty < 1 ? ci : { ...ci, quantity: newQty };
+            if (newQty < 1) return ci;
+
+            // Stock validation for product increment
+            if (delta > 0 && ci.item_type === 'product') {
+                const catalogItem = catalog.find(c => c.name === ci.name && c.item_type === 'product');
+                if (catalogItem && newQty > (catalogItem.current_stock ?? 0)) {
+                    alert(`Estoque insuficiente. Apenas ${catalogItem.current_stock} unidades disponíveis de "${ci.name}".`);
+                    return ci;
+                }
+            }
+
+            return { ...ci, quantity: newQty };
         }));
     }
 
@@ -182,6 +212,34 @@ export default function PDV() {
         setFinalizing(true);
 
         try {
+            // 0. PRE-CLOSE STOCK VALIDATION — re-check fresh stock from DB
+            const productItemsInCart = comandaItems.filter(ci => ci.item_type === 'product');
+            if (productItemsInCart.length > 0) {
+                const productIds = productItemsInCart
+                    .map(ci => ci.catalogId || catalog.find(c => c.name === ci.name && c.item_type === 'product')?.catalogId)
+                    .filter(Boolean);
+
+                if (productIds.length > 0) {
+                    const { data: freshProducts } = await supabase
+                        .from('products')
+                        .select('id, name, current_stock')
+                        .in('id', productIds);
+
+                    const freshMap = {};
+                    (freshProducts || []).forEach(p => { freshMap[p.id] = p; });
+
+                    for (const ci of productItemsInCart) {
+                        const pid = ci.catalogId || catalog.find(c => c.name === ci.name && c.item_type === 'product')?.catalogId;
+                        const fresh = freshMap[pid];
+                        if (fresh && ci.quantity > fresh.current_stock) {
+                            alert(`O produto "${ci.name}" não tem estoque suficiente para fechar a comanda. Disponível: ${fresh.current_stock}, no carrinho: ${ci.quantity}.`);
+                            setFinalizing(false);
+                            return;
+                        }
+                    }
+                }
+            }
+
             // 1. Update order status, total, payment method, closed_at
             const { error: updateError } = await supabase
                 .from('orders')
@@ -212,7 +270,29 @@ export default function PDV() {
                 if (itemsError) console.warn('order_items insert warning:', itemsError.message);
             }
 
-            // 3. Success
+            // 3. Stock decrement — decrease current_stock for each product sold
+            const productItems = comandaItems.filter(ci => ci.item_type === 'product');
+            if (productItems.length > 0) {
+                const stockUpdates = productItems.map(async (ci) => {
+                    // Find the catalogId from the cart item or catalog
+                    const catItem = catalog.find(c => c.name === ci.name && c.item_type === 'product');
+                    const productId = ci.catalogId || catItem?.catalogId;
+                    const currentStock = catItem?.current_stock ?? 0;
+                    if (productId) {
+                        const newStock = Math.max(0, currentStock - ci.quantity);
+                        const { error: stockErr } = await supabase
+                            .from('products')
+                            .update({ current_stock: newStock })
+                            .eq('id', productId);
+                        if (stockErr) console.warn(`Erro ao dar baixa no estoque de "${ci.name}":`, stockErr.message);
+                    } else {
+                        console.warn(`Produto "${ci.name}" não encontrado no catálogo para baixa de estoque.`);
+                    }
+                });
+                await Promise.all(stockUpdates);
+            }
+
+            // 4. Success
             alert('✅ Comanda fechada com sucesso!');
             navigate('/');
         } catch (err) {
@@ -371,24 +451,37 @@ export default function PDV() {
                                         {/* Dropdown */}
                                         {showCatalog && filteredCatalog.length > 0 && (
                                             <div className="absolute z-20 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl shadow-black/40 max-h-52 overflow-y-auto">
-                                                {filteredCatalog.map((cItem, i) => (
-                                                    <button
-                                                        key={`${cItem.item_type}-${cItem.catalogId || i}`}
-                                                        onClick={() => addItem(cItem)}
-                                                        className="w-full text-left px-4 py-2.5 flex items-center justify-between hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors"
-                                                    >
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${cItem.item_type === 'service' ? 'bg-blue-500/15 text-blue-400' : 'bg-amber-500/15 text-amber-400'
-                                                                }`}>
-                                                                {cItem.item_type === 'service' ? 'SRV' : 'PRD'}
+                                                {filteredCatalog.map((cItem, i) => {
+                                                    const isOutOfStock = cItem.item_type === 'product' && (cItem.current_stock ?? 0) <= 0;
+                                                    return (
+                                                        <button
+                                                            key={`${cItem.item_type}-${cItem.catalogId || i}`}
+                                                            onClick={() => !isOutOfStock && addItem(cItem)}
+                                                            disabled={isOutOfStock}
+                                                            className={`w-full text-left px-4 py-2.5 flex items-center justify-between first:rounded-t-xl last:rounded-b-xl transition-colors ${isOutOfStock
+                                                                ? 'opacity-50 cursor-not-allowed bg-slate-900/30'
+                                                                : 'hover:bg-slate-700 cursor-pointer'
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${cItem.item_type === 'service' ? 'bg-blue-500/15 text-blue-400' : 'bg-amber-500/15 text-amber-400'
+                                                                    }`}>
+                                                                    {cItem.item_type === 'service' ? 'SRV' : 'PRD'}
+                                                                </span>
+                                                                <span className="text-sm text-slate-300">{cItem.name}</span>
+                                                                {isOutOfStock && (
+                                                                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400">Esgotado</span>
+                                                                )}
+                                                                {cItem.item_type === 'product' && !isOutOfStock && cItem.current_stock <= 5 && (
+                                                                    <span className="text-[9px] text-amber-400">({cItem.current_stock} un.)</span>
+                                                                )}
+                                                            </div>
+                                                            <span className="text-xs font-semibold text-emerald-400">
+                                                                R$ {cItem.price.toFixed(2).replace('.', ',')}
                                                             </span>
-                                                            <span className="text-sm text-slate-300">{cItem.name}</span>
-                                                        </div>
-                                                        <span className="text-xs font-semibold text-emerald-400">
-                                                            R$ {cItem.price.toFixed(2).replace('.', ',')}
-                                                        </span>
-                                                    </button>
-                                                ))}
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         )}
 
@@ -448,8 +541,8 @@ export default function PDV() {
                                                 key={pm.key}
                                                 onClick={() => setSelectedPaymentMethod(pm.key)}
                                                 className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 ${selectedPaymentMethod === pm.key
-                                                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30'
-                                                        : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800 hover:text-slate-300'
+                                                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30'
+                                                    : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800 hover:text-slate-300'
                                                     }`}
                                             >
                                                 {pm.icon}
@@ -463,8 +556,8 @@ export default function PDV() {
                                         onClick={handleFinalizeComanda}
                                         disabled={!selectedPaymentMethod || finalizing || comandaItems.length === 0}
                                         className={`w-full mt-6 px-6 py-4 rounded-xl text-base font-bold text-white flex items-center justify-center gap-2 transition-all duration-200 ${selectedPaymentMethod && !finalizing && comandaItems.length > 0
-                                                ? 'bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25 cursor-pointer'
-                                                : 'bg-emerald-500/50 cursor-not-allowed opacity-50'
+                                            ? 'bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25 cursor-pointer'
+                                            : 'bg-emerald-500/50 cursor-not-allowed opacity-50'
                                             }`}
                                     >
                                         {finalizing ? (

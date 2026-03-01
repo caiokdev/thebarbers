@@ -107,7 +107,7 @@ export default function Financeiro() {
             const { data: shop } = await supabase
                 .from('barbershops')
                 .select('id')
-                .eq('name', 'The Barbers Club')
+                .limit(1)
                 .single();
             if (shop) setBarbershopId(shop.id);
             else setLoading(false);

@@ -11,6 +11,7 @@ export default function Clientes() {
     const [loading, setLoading] = useState(true);
     const [clientesLista, setClientesLista] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
 
     // KPIs
     const [totalClientes, setTotalClientes] = useState(0);
@@ -33,7 +34,7 @@ export default function Clientes() {
             const { data: shop } = await supabase
                 .from('barbershops')
                 .select('id')
-                .eq('name', 'The Barbers Club')
+                .limit(1)
                 .single();
             if (shop) setBarbershopId(shop.id);
             else setLoading(false);
@@ -110,14 +111,24 @@ export default function Clientes() {
         if (barbershopId) fetchClientes();
     }, [barbershopId, fetchClientes]);
 
-    // ── Filtered list ──
+    // ── Filtered list (text search + status filter) ──
     const filteredClientes = useMemo(() => {
-        if (!searchTerm.trim()) return clientesLista;
-        const term = searchTerm.toLowerCase();
-        return clientesLista.filter(c =>
-            c.nome.toLowerCase().includes(term) || c.telefone.includes(term)
-        );
-    }, [clientesLista, searchTerm]);
+        return clientesLista
+            .filter(c => {
+                // Status filter
+                if (statusFilter === 'all') return true;
+                if (statusFilter === 'active') return c.isSubscriber === true && c.subscriptionStatus === 'active';
+                if (statusFilter === 'overdue') return c.isSubscriber === true && c.subscriptionStatus === 'overdue';
+                if (statusFilter === 'avulso') return !c.isSubscriber;
+                return true;
+            })
+            .filter(c => {
+                // Text search
+                if (!searchTerm.trim()) return true;
+                const term = searchTerm.toLowerCase();
+                return c.nome.toLowerCase().includes(term) || c.telefone.includes(term);
+            });
+    }, [clientesLista, searchTerm, statusFilter]);
 
     // ── Save new client ──
     const handleSaveClient = async () => {
@@ -318,7 +329,42 @@ export default function Clientes() {
                         </div>
                     </div>
 
-                    {/* ══════════ LINHA 2 — Search Bar ══════════ */}
+                    {/* ══════════ LINHA 2 — Filtros + Search ══════════ */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                        {/* Filter Pills */}
+                        <div className="flex items-center gap-1.5 bg-slate-800 rounded-xl border border-slate-700 p-1">
+                            {[
+                                { key: 'all', label: 'Todos' },
+                                { key: 'active', label: 'Em Dia' },
+                                { key: 'overdue', label: 'Atrasados' },
+                                { key: 'avulso', label: 'Avulsos' },
+                            ].map(f => (
+                                <button
+                                    key={f.key}
+                                    onClick={() => setStatusFilter(f.key)}
+                                    className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ${statusFilter === f.key
+                                        ? f.key === 'overdue'
+                                            ? 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30 shadow-sm'
+                                            : f.key === 'active'
+                                                ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30 shadow-sm'
+                                                : 'bg-slate-700 text-slate-200 ring-1 ring-slate-600 shadow-sm'
+                                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50'
+                                        }`}
+                                >
+                                    {f.label}
+                                    {f.key !== 'all' && (
+                                        <span className="ml-1.5 text-[10px] opacity-70">
+                                            {f.key === 'active' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'active').length
+                                                : f.key === 'overdue' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'overdue').length
+                                                    : clientesLista.filter(c => !c.isSubscriber).length}
+                                        </span>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* ══════════ Search Bar ══════════ */}
                     <div className="relative">
                         <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

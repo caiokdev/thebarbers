@@ -182,7 +182,7 @@ export default function Relatorios() {
             const { data: shop } = await supabase
                 .from('barbershops')
                 .select('id')
-                .eq('name', 'The Barbers Club')
+                .limit(1)
                 .single();
             if (shop) setBarbershopId(shop.id);
         }
@@ -851,6 +851,63 @@ export default function Relatorios() {
                                             </div>
                                         )}
                                     </div>
+
+                                    {/* Serviços Mais Vendidos — Ranking */}
+                                    {(() => {
+                                        const serviceRanking = ordersDoMes.reduce((acc, order) => {
+                                            (order.order_items || []).forEach(item => {
+                                                if (item?.item_type === 'service' && item?.name) {
+                                                    const qty = item.quantity || 1;
+                                                    if (!acc[item.name]) acc[item.name] = 0;
+                                                    acc[item.name] += qty;
+                                                }
+                                            });
+                                            return acc;
+                                        }, {});
+                                        const sorted = Object.entries(serviceRanking)
+                                            .map(([nome, qtd]) => ({ nome, qtd }))
+                                            .sort((a, b) => b.qtd - a.qtd);
+                                        const maxQtd = sorted[0]?.qtd || 1;
+                                        const medals = ['🥇', '🥈', '🥉'];
+                                        return (
+                                            <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
+                                                <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                                                    <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+                                                    </svg>
+                                                    Serviços Mais Vendidos — {periodLabel}
+                                                </h2>
+                                                {sorted.length === 0 ? (
+                                                    <div className="flex items-center justify-center h-32 text-slate-500 text-sm">Nenhum serviço registrado</div>
+                                                ) : (
+                                                    <div className="space-y-3">
+                                                        {sorted.map((s, i) => {
+                                                            const pct = (s.qtd / maxQtd) * 100;
+                                                            return (
+                                                                <div key={s.nome} className="flex items-center gap-3">
+                                                                    <span className="w-8 text-center text-lg flex-shrink-0">
+                                                                        {i < 3 ? medals[i] : <span className="text-xs text-slate-600 font-bold">{i + 1}º</span>}
+                                                                    </span>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center justify-between mb-1">
+                                                                            <span className="text-sm text-slate-300 font-medium truncate">{s.nome}</span>
+                                                                            <span className="text-xs font-bold text-amber-400 flex-shrink-0 ml-2">{s.qtd}x</span>
+                                                                        </div>
+                                                                        <div className="w-full bg-slate-900 rounded-full h-2">
+                                                                            <div
+                                                                                className="h-2 rounded-full transition-all duration-500"
+                                                                                style={{ width: `${pct}%`, backgroundColor: COLORS[i % COLORS.length] }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             )}
 

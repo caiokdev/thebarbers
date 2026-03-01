@@ -22,11 +22,11 @@ export default function useDashboardData() {
                 const { data: shop } = await supabase
                     .from('barbershops')
                     .select('id')
-                    .eq('name', 'The Barbers Club')
+                    .limit(1)
                     .single();
 
                 if (!shop) {
-                    console.error('Barbershop "The Barbers Club" não encontrado.');
+                    console.error('Nenhuma barbearia encontrada.');
                     setLoading(false);
                     return;
                 }
@@ -853,6 +853,20 @@ export default function useDashboardData() {
                         };
                     });
 
+                // --- NOVO: Clientes Inadimplentes (is_subscriber + overdue) ---
+                const { data: inadimplentesData } = await supabase
+                    .from('clients')
+                    .select('*')
+                    .eq('barbershop_id', bId)
+                    .eq('is_subscriber', true)
+                    .eq('subscription_status', 'overdue');
+
+                const clientesInadimplentes = (inadimplentesData || []).map(c => ({
+                    nome: c.name || 'Sem nome',
+                    telefone: c.phone || '—',
+                    status: 'Atrasado',
+                }));
+
                 // --- NOVO: Contratos a vencer (detalhe para Drawer) ---
                 const { data: contratosVencendoData } = await supabase
                     .from('subscriptions')
@@ -912,6 +926,7 @@ export default function useDashboardData() {
                     topClientes,
                     estoqueData,
                     pagamentosIncompletos,
+                    clientesInadimplentes,
                     aniversariantes,
                     aniversariantesSemana,
                     recompraList,

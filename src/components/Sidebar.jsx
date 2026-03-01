@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
+import { supabase } from '../supabaseClient';
 
 const menuItems = [
     {
@@ -69,16 +70,76 @@ const menuItems = [
 ];
 
 export default function Sidebar() {
+    const [shopName, setShopName] = useState('');
+    const [adminName, setAdminName] = useState('');
+    const [adminInitials, setAdminInitials] = useState('');
+
+    useEffect(() => {
+        async function fetchSidebarData() {
+            try {
+                const { data: shop } = await supabase
+                    .from('barbershops')
+                    .select('id, name')
+                    .limit(1)
+                    .single();
+
+                if (shop) {
+                    setShopName(shop.name || 'The Barbers');
+
+                    // Fetch admin profile
+                    const { data: admin } = await supabase
+                        .from('profiles')
+                        .select('name')
+                        .eq('barbershop_id', shop.id)
+                        .eq('role', 'admin')
+                        .limit(1)
+                        .single();
+
+                    if (admin?.name) {
+                        setAdminName(admin.name);
+                        const parts = admin.name.split(' ');
+                        setAdminInitials(
+                            parts.length >= 2
+                                ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+                                : admin.name.substring(0, 2).toUpperCase()
+                        );
+                    }
+                }
+            } catch (_) {
+                // silently handled
+            }
+        }
+        fetchSidebarData();
+
+        // Listen for realtime changes on barbershops table
+        const channel = supabase
+            .channel('sidebar-barbershop-changes')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'barbershops' }, (payload) => {
+                if (payload.new?.name) {
+                    setShopName(payload.new.name);
+                }
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+
+    // Derive display name parts
+    const nameParts = shopName.split(' ');
+    const mainName = nameParts.slice(0, -1).join(' ') || shopName;
+    const subName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+    const logoInitials = shopName ? shopName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase() : 'TB';
+
     return (
         <aside className="w-[260px] bg-slate-900 text-white h-full flex flex-col flex-shrink-0">
             {/* Logo */}
             <div className="h-[72px] flex items-center gap-3 px-6 border-b border-slate-800">
                 <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">
-                    TB
+                    {logoInitials}
                 </div>
                 <div>
-                    <p className="font-bold text-base leading-tight">The Barbers</p>
-                    <p className="text-[11px] text-slate-400 font-medium">Club</p>
+                    <p className="font-bold text-base leading-tight">{mainName}</p>
+                    {subName && <p className="text-[11px] text-slate-400 font-medium">{subName}</p>}
                 </div>
             </div>
 
@@ -106,10 +167,10 @@ export default function Sidebar() {
             <div className="px-4 py-4 border-t border-slate-800">
                 <div className="flex items-center gap-3 px-2">
                     <div className="w-9 h-9 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">
-                        LL
+                        {adminInitials || 'AD'}
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">Lucas Lima</p>
+                        <p className="text-sm font-medium text-white truncate">{adminName || 'Admin'}</p>
                         <p className="text-xs text-slate-500">Admin</p>
                     </div>
                 </div>
