@@ -197,11 +197,10 @@ export default function Dashboard() {
             },
             pagamentos: {
                 title: 'Pagamentos Pendentes',
-                columns: ['Cliente', 'Plano', 'Status'],
+                columns: ['Cliente', 'Status'],
                 data: (data.pagamentosIncompletos || []).map(p => ({
                     nome: p.nome || p.name || 'Sem nome',
-                    plano: p.plano || p.plan || '—',
-                    status: p.status || 'Pendente',
+                    status: 'Atrasado',
                 })),
             },
             // KPI drill-downs
