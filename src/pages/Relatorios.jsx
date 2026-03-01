@@ -106,7 +106,7 @@ export default function Relatorios() {
                 // 1. All closed orders for the year
                 const { data: orders } = await supabase
                     .from('orders')
-                    .select('id, total_amount, closed_at, professional_id, payment_method, client_id')
+                    .select('id, total_amount, closed_at, scheduled_at, created_at, professional_id, payment_method, client_id')
                     .eq('barbershop_id', barbershopId)
                     .eq('status', 'closed')
                     .gte('closed_at', startOfYear)
@@ -170,8 +170,9 @@ export default function Relatorios() {
                 }
 
                 // ═══ KPI: Clientes Hoje ═══
-                const todayStr = new Date().toISOString().slice(0, 10);
-                const clientesHoje = allOrders.filter(o => o.closed_at && o.closed_at.slice(0, 10) === todayStr).length;
+                const hoje = new Date().toLocaleDateString();
+                const comandasHoje = allOrders.filter(o => o.closed_at && new Date(o.closed_at).toLocaleDateString() === hoje);
+                const clientesHoje = comandasHoje.length;
 
                 // ═══ KPI: Comandas Mês ═══
                 const comandasMes = currentMonthOrders.length;
@@ -179,21 +180,34 @@ export default function Relatorios() {
                 // ═══ KPI: Ticket Médio ═══
                 const ticketMedio = comandasMes > 0 ? faturamentoMes / comandasMes : 0;
 
-                // ═══ KPI: Taxa de Retorno ═══
-                const clientVisits = {};
-                allOrders.forEach(o => {
-                    if (o.client_id) {
-                        clientVisits[o.client_id] = (clientVisits[o.client_id] || 0) + 1;
-                    }
-                });
-                const uniqueClients = Object.keys(clientVisits).length;
-                const returningClients = Object.values(clientVisits).filter(v => v > 1).length;
-                const taxaRetorno = uniqueClients > 0 ? (returningClients / uniqueClients) * 100 : 0;
+                // ═══ KPI: Taxa de Retorno (Fidelização no Mês) ═══
+                // 1) Clientes únicos do mês selecionado
+                const clientesDoMesSet = new Set();
+                currentMonthOrders.forEach(o => { if (o.client_id) clientesDoMesSet.add(o.client_id); });
+                const clientesDoMes = [...clientesDoMesSet];
 
-                // ═══ KPI: Horário de Pico ═══
+                // 2) Buscar TODAS as comandas desses clientes (histórico total, sem filtro de mês)
+                let totalVisitasMap = {};
+                if (clientesDoMes.length > 0) {
+                    const { data: allTimeOrders } = await supabase
+                        .from('orders')
+                        .select('client_id')
+                        .eq('barbershop_id', barbershopId)
+                        .eq('status', 'closed')
+                        .in('client_id', clientesDoMes);
+                    (allTimeOrders || []).forEach(o => {
+                        if (o.client_id) totalVisitasMap[o.client_id] = (totalVisitasMap[o.client_id] || 0) + 1;
+                    });
+                }
+
+                // 3) Quantos desses clientes do mês têm > 1 visita no histórico total
+                const clientesFieis = clientesDoMes.filter(cid => (totalVisitasMap[cid] || 0) > 1).length;
+                const taxaRetorno = clientesDoMes.length > 0 ? (clientesFieis / clientesDoMes.length) * 100 : 0;
+
+                // ═══ KPI: Horário de Pico (usa scheduled_at, fallback created_at) ═══
                 const hourCounts = {};
                 currentMonthOrders.forEach(o => {
-                    const h = new Date(o.closed_at).getHours();
+                    const h = new Date(o.scheduled_at || o.created_at).getHours();
                     hourCounts[h] = (hourCounts[h] || 0) + 1;
                 });
                 let horarioPico = null;
