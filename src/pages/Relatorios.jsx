@@ -12,8 +12,10 @@ import {
 
 const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const COLORS = ['#34d399', '#60a5fa', '#a78bfa', '#fbbf24', '#f87171', '#38bdf8', '#c084fc', '#fb923c'];
+const MRR_FALLBACK_VALUE = 80; // valor padrão da assinatura
 
-const formatBRL = (v) => `R$ ${(v || 0).toFixed(2).replace('.', ',')}`;
+const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatBRL = (v) => fmtBRL.format(v || 0);
 
 const TABS = [
     { key: 'visao_geral', label: 'Visão Geral', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
@@ -22,10 +24,26 @@ const TABS = [
     { key: 'historico', label: 'Histórico de Movimentações', icon: 'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z' },
 ];
 
+/* ── Print styles (injected once) ── */
+if (typeof document !== 'undefined' && !document.getElementById('print-styles')) {
+    const style = document.createElement('style');
+    style.id = 'print-styles';
+    style.textContent = `
+        @media print {
+            .print-hidden { display: none !important; }
+            body { background: #0f172a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 export default function Relatorios() {
+    const now = new Date();
+    const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
     const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(false);
-    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+    const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod);
     const [activeTab, setActiveTab] = useState('visao_geral');
 
     // ── Data states ──
@@ -34,6 +52,24 @@ export default function Relatorios() {
     const [paymentMethods, setPaymentMethods] = useState([]);
     const [monthlyClients, setMonthlyClients] = useState([]);
     const [extratoMovimentacoes, setExtratoMovimentacoes] = useState([]);
+
+    // ── KPI states ──
+    const [kpis, setKpis] = useState({
+        faturamentoMes: 0,
+        crescimentoMM: null,
+        clientesHoje: 0,
+        comandasMes: 0,
+        ticketMedio: 0,
+        taxaRetorno: 0,
+        horarioPico: null,
+        mrr: 0,
+        activeSubsCount: 0,
+    });
+
+    // ── Derived date values ──
+    const selectedYear = useMemo(() => parseInt(selectedPeriod.split('-')[0]), [selectedPeriod]);
+    const selectedMonth = useMemo(() => parseInt(selectedPeriod.split('-')[1]) - 1, [selectedPeriod]);
+    const periodLabel = useMemo(() => `${MONTH_LABELS[selectedMonth]} ${selectedYear}`, [selectedMonth, selectedYear]);
 
     // ── Fetch barbershop ──
     useEffect(() => {
@@ -57,6 +93,16 @@ export default function Relatorios() {
                 const startOfYear = new Date(selectedYear, 0, 1).toISOString();
                 const endOfYear = new Date(selectedYear, 11, 31, 23, 59, 59, 999).toISOString();
 
+                // Current month boundaries
+                const startOfMonth = new Date(selectedYear, selectedMonth, 1).toISOString();
+                const endOfMonth = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999).toISOString();
+
+                // Previous month boundaries
+                const prevMonth = selectedMonth === 0 ? 11 : selectedMonth - 1;
+                const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
+                const startOfPrevMonth = new Date(prevYear, prevMonth, 1).toISOString();
+                const endOfPrevMonth = new Date(prevYear, prevMonth + 1, 0, 23, 59, 59, 999).toISOString();
+
                 // 1. All closed orders for the year
                 const { data: orders } = await supabase
                     .from('orders')
@@ -68,7 +114,25 @@ export default function Relatorios() {
 
                 const allOrders = orders || [];
 
-                // 2. All expenses for the year
+                // 2. Previous month orders (for growth comparison)
+                let prevMonthOrders = [];
+                if (prevYear < selectedYear) {
+                    const { data: pOrders } = await supabase
+                        .from('orders')
+                        .select('total_amount')
+                        .eq('barbershop_id', barbershopId)
+                        .eq('status', 'closed')
+                        .gte('closed_at', startOfPrevMonth)
+                        .lte('closed_at', endOfPrevMonth);
+                    prevMonthOrders = pOrders || [];
+                } else {
+                    prevMonthOrders = allOrders.filter(o => {
+                        const m = new Date(o.closed_at).getMonth();
+                        return m === prevMonth;
+                    });
+                }
+
+                // 3. All expenses for the year
                 const { data: expenses } = await supabase
                     .from('expenses')
                     .select('amount, created_at, description')
@@ -77,6 +141,84 @@ export default function Relatorios() {
                     .lte('created_at', endOfYear);
 
                 const allExpenses = expenses || [];
+
+                // 4. Active subscribers for MRR
+                const { data: activeSubs } = await supabase
+                    .from('clients')
+                    .select('id')
+                    .eq('barbershop_id', barbershopId)
+                    .eq('is_subscriber', true)
+                    .eq('subscription_status', 'active');
+                const activeSubsCount = (activeSubs || []).length;
+
+                // ═══ Filter orders for current month ═══
+                const currentMonthOrders = allOrders.filter(o => {
+                    const d = new Date(o.closed_at);
+                    return d.getMonth() === selectedMonth;
+                });
+
+                // ═══ KPI: Faturamento Mês ═══
+                const faturamentoMes = currentMonthOrders.reduce((s, o) => s + parseFloat(o.total_amount || 0), 0);
+
+                // ═══ KPI: Crescimento M/M ═══
+                const faturamentoPrev = prevMonthOrders.reduce((s, o) => s + parseFloat(o.total_amount || 0), 0);
+                let crescimentoMM = null;
+                if (faturamentoPrev > 0) {
+                    crescimentoMM = ((faturamentoMes - faturamentoPrev) / faturamentoPrev) * 100;
+                } else if (faturamentoMes > 0) {
+                    crescimentoMM = 100;
+                }
+
+                // ═══ KPI: Clientes Hoje ═══
+                const todayStr = new Date().toISOString().slice(0, 10);
+                const clientesHoje = allOrders.filter(o => o.closed_at && o.closed_at.slice(0, 10) === todayStr).length;
+
+                // ═══ KPI: Comandas Mês ═══
+                const comandasMes = currentMonthOrders.length;
+
+                // ═══ KPI: Ticket Médio ═══
+                const ticketMedio = comandasMes > 0 ? faturamentoMes / comandasMes : 0;
+
+                // ═══ KPI: Taxa de Retorno ═══
+                const clientVisits = {};
+                allOrders.forEach(o => {
+                    if (o.client_id) {
+                        clientVisits[o.client_id] = (clientVisits[o.client_id] || 0) + 1;
+                    }
+                });
+                const uniqueClients = Object.keys(clientVisits).length;
+                const returningClients = Object.values(clientVisits).filter(v => v > 1).length;
+                const taxaRetorno = uniqueClients > 0 ? (returningClients / uniqueClients) * 100 : 0;
+
+                // ═══ KPI: Horário de Pico ═══
+                const hourCounts = {};
+                currentMonthOrders.forEach(o => {
+                    const h = new Date(o.closed_at).getHours();
+                    hourCounts[h] = (hourCounts[h] || 0) + 1;
+                });
+                let horarioPico = null;
+                let maxCount = 0;
+                Object.entries(hourCounts).forEach(([h, count]) => {
+                    if (count > maxCount) {
+                        maxCount = count;
+                        horarioPico = parseInt(h);
+                    }
+                });
+
+                // ═══ KPI: MRR ═══
+                const mrr = activeSubsCount * MRR_FALLBACK_VALUE;
+
+                setKpis({
+                    faturamentoMes,
+                    crescimentoMM,
+                    clientesHoje,
+                    comandasMes,
+                    ticketMedio,
+                    taxaRetorno,
+                    horarioPico,
+                    mrr,
+                    activeSubsCount,
+                });
 
                 // ═══ Monthly Revenue (bar chart) ═══
                 const revenueByMonth = Array.from({ length: 12 }, (_, i) => ({
@@ -96,8 +238,8 @@ export default function Relatorios() {
 
                 setMonthlyRevenue(revenueByMonth);
 
-                // ═══ Barber performance (horizontal bar) ═══
-                const proIds = [...new Set(allOrders.map(o => o.professional_id).filter(Boolean))];
+                // ═══ Barber performance (horizontal bar) — filtered to selected month ═══
+                const proIds = [...new Set(currentMonthOrders.map(o => o.professional_id).filter(Boolean))];
                 let proMap = {};
                 if (proIds.length > 0) {
                     const { data: pros } = await supabase.from('profiles').select('id, name').in('id', proIds);
@@ -105,7 +247,7 @@ export default function Relatorios() {
                 }
 
                 const grouped = {};
-                allOrders.forEach(o => {
+                currentMonthOrders.forEach(o => {
                     const pid = o.professional_id;
                     if (!pid) return;
                     if (!grouped[pid]) grouped[pid] = { nome: proMap[pid] || 'Sem nome', total: 0, qtd: 0 };
@@ -114,10 +256,10 @@ export default function Relatorios() {
                 });
                 setBarberPerformance(Object.values(grouped).sort((a, b) => b.total - a.total));
 
-                // ═══ Payment methods (pie chart) ═══
+                // ═══ Payment methods (pie chart) — filtered to selected month ═══
                 const payMap = {};
                 const payLabels = { pix: 'PIX', cash: 'Dinheiro', credit: 'Crédito', debit: 'Débito', credit_card: 'Crédito', debit_card: 'Débito', transfer: 'Transferência' };
-                allOrders.forEach(o => {
+                currentMonthOrders.forEach(o => {
                     const method = payLabels[o.payment_method] || o.payment_method || 'Outro';
                     if (!payMap[method]) payMap[method] = 0;
                     payMap[method] += parseFloat(o.total_amount || 0);
@@ -139,21 +281,23 @@ export default function Relatorios() {
                 clientSets.forEach((s, i) => { clientsByMonth[i].clientes = s.size; });
                 setMonthlyClients(clientsByMonth);
 
-                // ═══ Extrato de Movimentações (orders + expenses combined) ═══
-                const clientIds = [...new Set(allOrders.map(o => o.client_id).filter(Boolean))];
+                // ═══ Extrato de Movimentações (orders + expenses combined) — selected month ═══
+                const clientIds = [...new Set(currentMonthOrders.map(o => o.client_id).filter(Boolean))];
                 let clientMap = {};
                 if (clientIds.length > 0) {
                     const { data: clients } = await supabase.from('clients').select('id, name').in('id', clientIds);
                     (clients || []).forEach(c => { clientMap[c.id] = c.name; });
                 }
 
-                const entradas = allOrders.map(o => ({
+                const monthExpenses = allExpenses.filter(e => new Date(e.created_at).getMonth() === selectedMonth);
+
+                const entradas = currentMonthOrders.map(o => ({
                     tipo: 'entrada',
                     data: o.closed_at,
                     valor: parseFloat(o.total_amount || 0),
                     descricao: 'Comanda — ' + (clientMap[o.client_id] || 'Cliente avulso'),
                 }));
-                const saidas = allExpenses.map(e => ({
+                const saidas = monthExpenses.map(e => ({
                     tipo: 'saida',
                     data: e.created_at,
                     valor: parseFloat(e.amount || 0),
@@ -169,12 +313,11 @@ export default function Relatorios() {
             }
         }
         fetchData();
-    }, [barbershopId, selectedYear]);
+    }, [barbershopId, selectedPeriod, selectedYear, selectedMonth]);
 
-    // ── Totals ──
+    // ── Totals (year-level) ──
     const totalAnual = useMemo(() => monthlyRevenue.reduce((s, m) => s + m.entradas, 0), [monthlyRevenue]);
     const totalSaidas = useMemo(() => monthlyRevenue.reduce((s, m) => s + m.saidas, 0), [monthlyRevenue]);
-    const totalComandas = useMemo(() => barberPerformance.reduce((s, b) => s + b.qtd, 0), [barberPerformance]);
 
     // ── Custom tooltip ──
     const CustomTooltip = ({ active, payload, label }) => {
@@ -193,44 +336,51 @@ export default function Relatorios() {
         return null;
     };
 
-    // ── Year options ──
-    const currentYear = new Date().getFullYear();
-    const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
+    // ── PDF Export ──
+    const handlePrint = () => window.print();
 
     return (
         <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
+            <div className="print-hidden">
+                <Sidebar />
+            </div>
             <main className="flex-1 flex flex-col h-full overflow-hidden">
                 {/* ── Header ── */}
-                <div className="flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm flex-shrink-0">
+                <div className="flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm flex-shrink-0 print-hidden">
                     <div>
                         <h1 className="text-xl font-bold text-slate-100">Relatórios e Gráficos</h1>
                         <p className="text-xs text-slate-500 mt-0.5">Análise visual de desempenho</p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Ano</label>
-                        <select
-                            value={selectedYear}
-                            onChange={e => setSelectedYear(parseInt(e.target.value))}
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Período</label>
+                        <input
+                            type="month"
+                            value={selectedPeriod}
+                            onChange={e => setSelectedPeriod(e.target.value)}
                             className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer"
+                        />
+                        <button
+                            onClick={handlePrint}
+                            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-slate-100 px-4 py-2.5 rounded-xl text-sm font-medium transition-all"
                         >
-                            {yearOptions.map(y => (
-                                <option key={y} value={y}>{y}</option>
-                            ))}
-                        </select>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                            </svg>
+                            Exportar PDF
+                        </button>
                     </div>
                 </div>
 
                 {/* ── Tab Navigation ── */}
-                <div className="px-8 border-b border-slate-800 flex-shrink-0">
+                <div className="px-8 border-b border-slate-800 flex-shrink-0 print-hidden">
                     <nav className="flex gap-1 -mb-px">
                         {TABS.map(tab => (
                             <button
                                 key={tab.key}
                                 onClick={() => setActiveTab(tab.key)}
                                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg border-b-2 transition-all duration-200 ${activeTab === tab.key
-                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500'
-                                        : 'text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/50'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500'
+                                    : 'text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/50'
                                     }`}
                             >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -253,19 +403,40 @@ export default function Relatorios() {
                         </div>
                     ) : (
                         <>
-                            {/* ═══ KPI Summary (always visible) ═══ */}
+                            {/* ═══ Top KPIs (always visible) ═══ */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {/* Faturamento Mês + Crescimento M/M */}
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
-                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Faturamento {selectedYear}</p>
-                                    <p className="text-2xl font-bold text-emerald-400 mt-1">{formatBRL(totalAnual)}</p>
+                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Faturamento — {periodLabel}</p>
+                                    <p className="text-2xl font-bold text-emerald-400 mt-1">{formatBRL(kpis.faturamentoMes)}</p>
+                                    {kpis.crescimentoMM !== null && (
+                                        <div className="flex items-center gap-1.5 mt-2">
+                                            {kpis.crescimentoMM >= 0 ? (
+                                                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-4 h-4 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 4.5l15 15m0 0V8.25m0 11.25H8.25" />
+                                                </svg>
+                                            )}
+                                            <span className={`text-xs font-semibold ${kpis.crescimentoMM >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                {kpis.crescimentoMM >= 0 ? '+' : ''}{kpis.crescimentoMM.toFixed(1)}% vs mês anterior
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
+                                {/* Clientes Hoje */}
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
-                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Saídas {selectedYear}</p>
-                                    <p className="text-2xl font-bold text-rose-400 mt-1">{formatBRL(totalSaidas)}</p>
+                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clientes Hoje</p>
+                                    <p className="text-2xl font-bold text-blue-400 mt-1">{kpis.clientesHoje}</p>
+                                    <p className="text-[10px] text-slate-600 mt-1">Comandas fechadas hoje</p>
                                 </div>
+                                {/* Comandas do Mês */}
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
-                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Comandas Fechadas</p>
-                                    <p className="text-2xl font-bold text-blue-400 mt-1">{totalComandas}</p>
+                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Comandas — {periodLabel}</p>
+                                    <p className="text-2xl font-bold text-amber-400 mt-1">{kpis.comandasMes}</p>
+                                    <p className="text-[10px] text-slate-600 mt-1">Fechadas no período</p>
                                 </div>
                             </div>
 
@@ -273,54 +444,87 @@ export default function Relatorios() {
                             {/* TAB: Visão Geral                        */}
                             {/* ═════════════════════════════════════════ */}
                             {activeTab === 'visao_geral' && (
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    {/* Monthly Revenue */}
-                                    <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
-                                        <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                            <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                                            </svg>
-                                            Faturamento Mensal — {selectedYear}
-                                        </h2>
-                                        <ResponsiveContainer width="100%" height={280}>
-                                            <BarChart data={monthlyRevenue} barGap={2}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                                <XAxis dataKey="mes" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                                                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
-                                                <Tooltip content={<CustomTooltip />} />
-                                                <Bar dataKey="entradas" name="entradas" fill="#34d399" radius={[4, 4, 0, 0]} />
-                                                <Bar dataKey="saidas" name="saidas" fill="#f87171" radius={[4, 4, 0, 0]} />
-                                            </BarChart>
-                                        </ResponsiveContainer>
+                                <div className="space-y-6">
+                                    {/* KPI highlight row */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {/* Taxa de Retorno */}
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5">
+                                            <div className="w-14 h-14 rounded-2xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+                                                <svg className="w-7 h-7 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Taxa de Retorno</p>
+                                                <p className="text-3xl font-bold text-violet-400">{kpis.taxaRetorno.toFixed(0)}%</p>
+                                                <p className="text-[10px] text-slate-600 mt-0.5">Clientes com +1 visita no ano</p>
+                                            </div>
+                                        </div>
+                                        {/* MRR */}
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5">
+                                            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                                                <svg className="w-7 h-7 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Receita Recorrente (MRR)</p>
+                                                <p className="text-3xl font-bold text-emerald-400">{formatBRL(kpis.mrr)}</p>
+                                                <p className="text-[10px] text-slate-600 mt-0.5">{kpis.activeSubsCount} assinantes ativos × {formatBRL(MRR_FALLBACK_VALUE)}</p>
+                                            </div>
+                                        </div>
                                     </div>
 
-                                    {/* Monthly Clients (Area Chart) */}
-                                    <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
-                                        <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                            <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                                            </svg>
-                                            Clientes Atendidos por Mês
-                                        </h2>
-                                        <ResponsiveContainer width="100%" height={280}>
-                                            <AreaChart data={monthlyClients}>
-                                                <defs>
-                                                    <linearGradient id="clientGradient" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.3} />
-                                                        <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
-                                                    </linearGradient>
-                                                </defs>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                                <XAxis dataKey="mes" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                                                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
-                                                <Tooltip
-                                                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', fontSize: '12px' }}
-                                                    itemStyle={{ color: '#fbbf24' }}
-                                                    formatter={(v) => [`${v} clientes`, 'Atendidos']}
-                                                />
-                                                <Area type="monotone" dataKey="clientes" stroke="#fbbf24" strokeWidth={2.5} fill="url(#clientGradient)" dot={{ fill: '#fbbf24', r: 3 }} activeDot={{ r: 5 }} />
-                                            </AreaChart>
-                                        </ResponsiveContainer>
+                                    {/* Charts row */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        {/* Monthly Revenue */}
+                                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
+                                            <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                                                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                                                </svg>
+                                                Faturamento Mensal — {selectedYear}
+                                            </h2>
+                                            <ResponsiveContainer width="100%" height={280}>
+                                                <BarChart data={monthlyRevenue} barGap={2}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                                    <XAxis dataKey="mes" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
+                                                    <Tooltip content={<CustomTooltip />} />
+                                                    <Bar dataKey="entradas" name="entradas" fill="#34d399" radius={[4, 4, 0, 0]} />
+                                                    <Bar dataKey="saidas" name="saidas" fill="#f87171" radius={[4, 4, 0, 0]} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+
+                                        {/* Monthly Clients (Area Chart) */}
+                                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
+                                            <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                                                <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                                                </svg>
+                                                Clientes Atendidos por Mês
+                                            </h2>
+                                            <ResponsiveContainer width="100%" height={280}>
+                                                <AreaChart data={monthlyClients}>
+                                                    <defs>
+                                                        <linearGradient id="clientGradient" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.3} />
+                                                            <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                                    <XAxis dataKey="mes" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', fontSize: '12px' }}
+                                                        itemStyle={{ color: '#fbbf24' }}
+                                                        formatter={(v) => [`${v} clientes`, 'Atendidos']}
+                                                    />
+                                                    <Area type="monotone" dataKey="clientes" stroke="#fbbf24" strokeWidth={2.5} fill="url(#clientGradient)" dot={{ fill: '#fbbf24', r: 3 }} activeDot={{ r: 5 }} />
+                                                </AreaChart>
+                                            </ResponsiveContainer>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -330,13 +534,45 @@ export default function Relatorios() {
                             {/* ═════════════════════════════════════════ */}
                             {activeTab === 'vendas' && (
                                 <div className="space-y-6">
+                                    {/* KPI highlight row */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {/* Ticket Médio */}
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5">
+                                            <div className="w-14 h-14 rounded-2xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+                                                <svg className="w-7 h-7 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Ticket Médio — {periodLabel}</p>
+                                                <p className="text-3xl font-bold text-blue-400">{formatBRL(kpis.ticketMedio)}</p>
+                                                <p className="text-[10px] text-slate-600 mt-0.5">Média por comanda fechada</p>
+                                            </div>
+                                        </div>
+                                        {/* Horário de Pico */}
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5">
+                                            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                                                <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Horário Mais Movimentado</p>
+                                                <p className="text-3xl font-bold text-amber-400">
+                                                    {kpis.horarioPico !== null ? `${String(kpis.horarioPico).padStart(2, '0')}:00` : '—'}
+                                                </p>
+                                                <p className="text-[10px] text-slate-600 mt-0.5">Pico de atendimento em {periodLabel}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     {/* Barber Performance */}
                                     <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                                         <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
                                             <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                                             </svg>
-                                            Desempenho por Barbeiro — {selectedYear}
+                                            Desempenho por Barbeiro — {periodLabel}
                                         </h2>
                                         {barberPerformance.length === 0 ? (
                                             <div className="flex items-center justify-center h-64 text-slate-500 text-sm">Nenhum dado disponível</div>
@@ -366,14 +602,6 @@ export default function Relatorios() {
                                             </div>
                                         )}
                                     </div>
-
-                                    {/* Placeholder for future KPIs */}
-                                    <div className="bg-slate-800/50 rounded-2xl border border-dashed border-slate-700 p-8 text-center">
-                                        <svg className="w-8 h-8 text-slate-600 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                                        </svg>
-                                        <p className="text-sm text-slate-500">Mais KPIs de vendas em breve</p>
-                                    </div>
                                 </div>
                             )}
 
@@ -388,7 +616,7 @@ export default function Relatorios() {
                                             <svg className="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
                                             </svg>
-                                            Métodos de Pagamento — {selectedYear}
+                                            Métodos de Pagamento — {periodLabel}
                                         </h2>
                                         {paymentMethods.length === 0 ? (
                                             <div className="flex items-center justify-center h-64 text-slate-500 text-sm">Nenhum dado disponível</div>
@@ -462,7 +690,7 @@ export default function Relatorios() {
                                             <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
-                                            Extrato de Movimentações — {selectedYear}
+                                            Extrato de Movimentações — {periodLabel}
                                         </h2>
                                         <span className="text-xs text-slate-500 font-medium">{extratoMovimentacoes.length} movimentações</span>
                                     </div>
@@ -480,7 +708,7 @@ export default function Relatorios() {
                                                 {extratoMovimentacoes.length === 0 ? (
                                                     <tr>
                                                         <td colSpan={4} className="px-6 py-12 text-center text-slate-600">
-                                                            Nenhuma movimentação encontrada para {selectedYear}.
+                                                            Nenhuma movimentação encontrada para {periodLabel}.
                                                         </td>
                                                     </tr>
                                                 ) : (
