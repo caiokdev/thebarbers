@@ -105,6 +105,23 @@ export default function useDashboardData() {
                     (sum, o) => sum + parseFloat(o.total_amount || 0), 0
                 );
 
+                // --- Atendimentos Hoje (closed de hoje + total agendados hoje) ---
+                const [{ count: atendimentosHojeClosed }, { count: atendimentosHojeTotal }] = await Promise.all([
+                    supabase
+                        .from('orders')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('barbershop_id', bId)
+                        .eq('status', 'closed')
+                        .gte('scheduled_at', startOfDayISO)
+                        .lte('scheduled_at', endOfDayISO),
+                    supabase
+                        .from('orders')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('barbershop_id', bId)
+                        .gte('scheduled_at', startOfDayISO)
+                        .lte('scheduled_at', endOfDayISO),
+                ]);
+
                 // --- DRILL-DOWN: Detalhes do Faturamento Hoje ---
                 const { data: todayDetailOrders } = await supabase
                     .from('orders')
@@ -300,7 +317,7 @@ export default function useDashboardData() {
                     value: Math.round(s.value * 100) / 100,
                 }));
 
-                // --- PASSO 3: Origem de Agendamentos ---
+                // --- PASSO 3: Origem de Agendamentos (filtrado pelo mês atual) ---
                 const [
                     { count: ordersTotal },
                     { count: ordersApp },
@@ -309,17 +326,23 @@ export default function useDashboardData() {
                     supabase
                         .from('orders')
                         .select('*', { count: 'exact', head: true })
-                        .eq('barbershop_id', bId),
+                        .eq('barbershop_id', bId)
+                        .gte('created_at', startOfMonthISO)
+                        .lte('created_at', endOfMonthISO),
                     supabase
                         .from('orders')
                         .select('*', { count: 'exact', head: true })
                         .eq('barbershop_id', bId)
-                        .eq('origin', 'app'),
+                        .eq('origin', 'app')
+                        .gte('created_at', startOfMonthISO)
+                        .lte('created_at', endOfMonthISO),
                     supabase
                         .from('orders')
                         .select('*', { count: 'exact', head: true })
                         .eq('barbershop_id', bId)
-                        .eq('origin', 'reception'),
+                        .eq('origin', 'reception')
+                        .gte('created_at', startOfMonthISO)
+                        .lte('created_at', endOfMonthISO),
                 ]);
 
                 const appPercent = ordersTotal > 0 ? ((ordersApp / ordersTotal) * 100).toFixed(2) : '0.00';
@@ -869,6 +892,8 @@ export default function useDashboardData() {
                         ticketMedio,
                         activeSubsCount,
                         mrr,
+                        atendimentosHojeClosed: atendimentosHojeClosed || 0,
+                        atendimentosHojeTotal: atendimentosHojeTotal || 0,
                     },
                     origins: {
                         total: ordersTotal || 0,

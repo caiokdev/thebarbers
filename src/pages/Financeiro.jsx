@@ -9,8 +9,9 @@ import Sidebar from '../components/Sidebar';
 
 const MASTER_PASSWORD = 'admin123';
 
+const _fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 function formatBRL(v) {
-    return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',');
+    return _fmtBRL.format(Number(v) || 0);
 }
 
 function formatDate(iso) {
@@ -75,6 +76,10 @@ export default function Financeiro() {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
+    // ── Expandable row states ──
+    const [expandedModalOrderId, setExpandedModalOrderId] = useState(null);
+    const [expandedHistoricoOrderId, setExpandedHistoricoOrderId] = useState(null);
+
     // ── Expense modal ──
     const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
     const [expenseDesc, setExpenseDesc] = useState('');
@@ -120,7 +125,7 @@ export default function Financeiro() {
             // ═══ 1. ENTRADAS HOJE (orders closed today) — com dados para drill-down ═══
             const { data: todayOrders } = await supabase
                 .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id')
+                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type)')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed')
                 .gte('closed_at', startOfDayISO)
@@ -149,7 +154,7 @@ export default function Financeiro() {
             // ═══ 3. FATURAMENTO 7 DIAS + DESPESAS 7 DIAS ═══
             const { data: orders7d } = await supabase
                 .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id')
+                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type)')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed')
                 .gte('closed_at', sevenDaysAgo);
@@ -168,7 +173,7 @@ export default function Financeiro() {
             // ═══ 4. FATURAMENTO MÊS + DESPESAS MÊS ═══
             const { data: ordersMes } = await supabase
                 .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id')
+                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type)')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed')
                 .gte('closed_at', startOfMonthISO)
@@ -201,7 +206,7 @@ export default function Financeiro() {
             // ═══ 6. HISTÓRICO DE COMANDAS FECHADAS (filtrado pelo mês) ═══
             const { data: historico } = await supabase
                 .from('orders')
-                .select('id, total_amount, created_at, scheduled_at, closed_at, payment_method, client_id, professional_id')
+                .select('id, total_amount, created_at, scheduled_at, closed_at, payment_method, client_id, professional_id, order_items(name, price, quantity, item_type)')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed')
                 .gte('closed_at', startOfMonthISO)
@@ -240,6 +245,7 @@ export default function Financeiro() {
             const enrich = (arr) => (arr || []).map(o => ({
                 id: o.id, cliente: clientMap[o.client_id] || 'Cliente Avulso',
                 valor: parseFloat(o.total_amount || 0), data: o.closed_at,
+                order_items: o.order_items || [],
             }));
             setPedidosHoje(enrich(todayOrders));
             setPedidos7Dias(enrich(orders7d));
@@ -256,6 +262,7 @@ export default function Financeiro() {
                 fechamento: o.closed_at,
                 valor: parseFloat(o.total_amount || 0),
                 pagamento: o.payment_method || '—',
+                order_items: o.order_items || [],
             })));
 
         } catch (err) {
@@ -680,32 +687,82 @@ export default function Financeiro() {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-700/30">
-                                                {paginatedHistorico.map((h) => (
-                                                    <tr key={h.id} className="hover:bg-slate-700/20 transition-colors">
-                                                        <td className="py-3 pr-4">
-                                                            <p className="text-slate-200 font-medium">{h.cliente}</p>
-                                                        </td>
-                                                        <td className="py-3 pr-4">
-                                                            <p className="text-slate-400">{h.profissional}</p>
-                                                        </td>
-                                                        <td className="py-3 pr-4">
-                                                            <span className="text-slate-500">{formatDate(h.abertura)}</span>
-                                                            <span className="text-slate-600 ml-1">{formatTime(h.abertura)}</span>
-                                                        </td>
-                                                        <td className="py-3 pr-4">
-                                                            <span className="text-slate-500">{formatDate(h.fechamento)}</span>
-                                                            <span className="text-slate-600 ml-1">{formatTime(h.fechamento)}</span>
-                                                        </td>
-                                                        <td className="py-3 pr-4">
-                                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg bg-slate-700/50 text-xs text-slate-400">
-                                                                {payLabels[h.pagamento] || h.pagamento}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 text-right">
-                                                            <p className="text-emerald-400 font-bold">{formatBRL(h.valor)}</p>
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                                {paginatedHistorico.map((h) => {
+                                                    const items = h.order_items || [];
+                                                    const isExpH = expandedHistoricoOrderId === h.id;
+                                                    return (
+                                                        <React.Fragment key={h.id}>
+                                                            <tr
+                                                                className="hover:bg-slate-800 transition-colors cursor-pointer"
+                                                                onClick={() => setExpandedHistoricoOrderId(isExpH ? null : h.id)}
+                                                            >
+                                                                <td className="py-3 pr-4">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <svg className={`w-3.5 h-3.5 text-slate-600 transition-transform duration-200 ${isExpH ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                                                        </svg>
+                                                                        <p className="text-slate-200 font-medium">{h.cliente}</p>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="py-3 pr-4">
+                                                                    <p className="text-slate-400">{h.profissional}</p>
+                                                                </td>
+                                                                <td className="py-3 pr-4">
+                                                                    <span className="text-slate-500">{formatDate(h.abertura)}</span>
+                                                                    <span className="text-slate-600 ml-1">{formatTime(h.abertura)}</span>
+                                                                </td>
+                                                                <td className="py-3 pr-4">
+                                                                    <span className="text-slate-500">{formatDate(h.fechamento)}</span>
+                                                                    <span className="text-slate-600 ml-1">{formatTime(h.fechamento)}</span>
+                                                                </td>
+                                                                <td className="py-3 pr-4">
+                                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg bg-slate-700/50 text-xs text-slate-400">
+                                                                        {payLabels[h.pagamento] || h.pagamento}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="py-3 text-right">
+                                                                    <p className="text-emerald-400 font-bold">{formatBRL(h.valor)}</p>
+                                                                </td>
+                                                            </tr>
+                                                            {isExpH && (
+                                                                <tr>
+                                                                    <td colSpan={6} className="p-0">
+                                                                        <div className="bg-slate-900/50 border-l-2 border-emerald-500/30 px-5 py-3 mx-2 mb-2 rounded-lg">
+                                                                            {items.length > 0 ? (
+                                                                                <div className="space-y-1.5">
+                                                                                    {items.filter(it => it.item_type === 'service').length > 0 && (
+                                                                                        <div>
+                                                                                            <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-1">Serviços</p>
+                                                                                            {items.filter(it => it.item_type === 'service').map((it, j) => (
+                                                                                                <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                                                    <span>{it.quantity}x {it.name}</span>
+                                                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {items.filter(it => it.item_type === 'product').length > 0 && (
+                                                                                        <div>
+                                                                                            <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1 mt-2">Produtos</p>
+                                                                                            {items.filter(it => it.item_type === 'product').map((it, j) => (
+                                                                                                <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                                                    <span>{it.quantity}x {it.name}</span>
+                                                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            ) : (
+                                                                                <p className="text-xs text-slate-600 italic">Nenhum item detalhado registrado.</p>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </React.Fragment>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                         {/* Pagination controls */}
@@ -854,15 +911,61 @@ export default function Financeiro() {
                                         <p className="text-sm text-slate-500 text-center py-8">Nenhum registro encontrado.</p>
                                     )}
 
-                                    {detailsModalConfig.type === 'orders' && detailsModalConfig.data.map((item, i) => (
-                                        <div key={item.id || i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/40 border border-slate-700/30">
-                                            <div className="min-w-0">
-                                                <p className="text-sm text-slate-200 font-medium truncate">{item.cliente}</p>
-                                                <p className="text-[11px] text-slate-600">{formatDate(item.data)} {formatTime(item.data)}</p>
+                                    {detailsModalConfig.type === 'orders' && detailsModalConfig.data.map((item, i) => {
+                                        const items = item.order_items || [];
+                                        const isExpM = expandedModalOrderId === (item.id || i);
+                                        return (
+                                            <div key={item.id || i}>
+                                                <div
+                                                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/40 border border-slate-700/30 cursor-pointer hover:bg-slate-800 transition-colors"
+                                                    onClick={() => setExpandedModalOrderId(isExpM ? null : (item.id || i))}
+                                                >
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <svg className={`w-3.5 h-3.5 text-slate-600 flex-shrink-0 transition-transform duration-200 ${isExpM ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                                        </svg>
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm text-slate-200 font-medium truncate">{item.cliente}</p>
+                                                            <p className="text-[11px] text-slate-600">{formatDate(item.data)} {formatTime(item.data)}</p>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-sm font-bold text-emerald-400 ml-3 flex-shrink-0">{formatBRL(item.valor)}</p>
+                                                </div>
+                                                {isExpM && (
+                                                    <div className="bg-slate-900/50 border-l-2 border-emerald-500/30 px-5 py-3 mx-2 mb-1 rounded-lg mt-1">
+                                                        {items.length > 0 ? (
+                                                            <div className="space-y-1.5">
+                                                                {items.filter(it => it.item_type === 'service').length > 0 && (
+                                                                    <div>
+                                                                        <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-1">Serviços</p>
+                                                                        {items.filter(it => it.item_type === 'service').map((it, j) => (
+                                                                            <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                                <span>{it.quantity}x {it.name}</span>
+                                                                                <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                                {items.filter(it => it.item_type === 'product').length > 0 && (
+                                                                    <div>
+                                                                        <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1 mt-2">Produtos</p>
+                                                                        {items.filter(it => it.item_type === 'product').map((it, j) => (
+                                                                            <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                                <span>{it.quantity}x {it.name}</span>
+                                                                                <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-slate-600 italic">Nenhum item detalhado registrado.</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
-                                            <p className="text-sm font-bold text-emerald-400 ml-3 flex-shrink-0">{formatBRL(item.valor)}</p>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
 
                                     {detailsModalConfig.type === 'subscribers' && detailsModalConfig.data.map((item, i) => (
                                         <div key={item.id || i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/40 border border-slate-700/30">

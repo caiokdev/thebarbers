@@ -37,6 +37,97 @@ if (typeof document !== 'undefined' && !document.getElementById('print-styles'))
     document.head.appendChild(style);
 }
 
+/* ── Reusable accordion table for order drill-down ── */
+function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
+    const [expandedId, setExpandedId] = React.useState(null);
+    return (
+        <table className="w-full text-sm">
+            <thead>
+                <tr className="border-b border-slate-700">
+                    <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase w-5"></th>
+                    <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Data</th>
+                    <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Cliente</th>
+                    {showBarbeiro && <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Barbeiro</th>}
+                    <th className="text-right px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Valor R$</th>
+                </tr>
+            </thead>
+            <tbody>
+                {data.map((o, idx) => {
+                    const d = new Date(o.closed_at || o.created_at);
+                    const dataStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                    const items = o.order_items || [];
+                    const isExpanded = expandedId === (o.id || idx);
+                    const hasItems = items.length > 0;
+                    return (
+                        <React.Fragment key={o.id || idx}>
+                            <tr
+                                className={`border-b border-slate-700/50 cursor-pointer hover:bg-slate-800 transition-colors ${isExpanded ? 'bg-slate-800/60' : ''}`}
+                                onClick={() => setExpandedId(isExpanded ? null : (o.id || idx))}
+                            >
+                                <td className="px-2 py-2.5 text-slate-600 text-center">
+                                    <svg className={`w-3.5 h-3.5 inline-block transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                    </svg>
+                                </td>
+                                <td className="px-3 py-2.5 text-slate-300">{dataStr}</td>
+                                <td className="px-3 py-2.5 text-slate-300">{o.clienteNome || clientMap[o.client_id] || 'Cliente avulso'}</td>
+                                {showBarbeiro && <td className="px-3 py-2.5 text-slate-300">{proMap[o.professional_id] || 'Sem nome'}</td>}
+                                <td className="px-3 py-2.5 text-right font-semibold text-emerald-400">{formatBRL(parseFloat(o.total_amount || 0))}</td>
+                            </tr>
+                            {isExpanded && (
+                                <tr>
+                                    <td colSpan={showBarbeiro ? 5 : 4} className="p-0">
+                                        <div className="bg-slate-900/50 border-l-2 border-emerald-500/30 px-5 py-3 mx-2 mb-2 rounded-lg">
+                                            {hasItems ? (
+                                                <div className="space-y-1.5">
+                                                    {items.filter(it => it.item_type === 'service').length > 0 && (
+                                                        <div>
+                                                            <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-1">Serviços</p>
+                                                            {items.filter(it => it.item_type === 'service').map((it, j) => (
+                                                                <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                    <span>{it.quantity}x {it.name}</span>
+                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {items.filter(it => it.item_type === 'product').length > 0 && (
+                                                        <div>
+                                                            <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1 mt-2">Produtos</p>
+                                                            {items.filter(it => it.item_type === 'product').map((it, j) => (
+                                                                <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                    <span>{it.quantity}x {it.name}</span>
+                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {items.filter(it => it.item_type !== 'service' && it.item_type !== 'product').length > 0 && (
+                                                        <div>
+                                                            {items.filter(it => it.item_type !== 'service' && it.item_type !== 'product').map((it, j) => (
+                                                                <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
+                                                                    <span>{it.quantity}x {it.name}</span>
+                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-slate-600 italic">Nenhum item detalhado registrado.</p>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </React.Fragment>
+                    );
+                })}
+            </tbody>
+        </table>
+    );
+}
+
 export default function Relatorios() {
     const now = new Date();
     const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -53,11 +144,25 @@ export default function Relatorios() {
     const [monthlyClients, setMonthlyClients] = useState([]);
     const [extratoMovimentacoes, setExtratoMovimentacoes] = useState([]);
 
+    // ── Clientes Novos ──
+    const [clientesNovos, setClientesNovos] = useState([]);
+
+    // ── Lifted states for drill-down ──
+    const [ordersDoMes, setOrdersDoMes] = useState([]);
+    const [clientMapState, setClientMapState] = useState({});
+    const [proMapState, setProMapState] = useState({});
+    const [totalVisitasMapState, setTotalVisitasMapState] = useState({});
+
+    // ── Origem dos Agendamentos ──
+    const [origemData, setOrigemData] = useState({ total: 0, app: 0, reception: 0 });
+
+    // ── Modal Drill-Down ──
+    const [detailsModal, setDetailsModal] = useState({ open: false, type: '', title: '', data: [] });
+
     // ── KPI states ──
     const [kpis, setKpis] = useState({
         faturamentoMes: 0,
         crescimentoMM: null,
-        clientesHoje: 0,
         comandasMes: 0,
         ticketMedio: 0,
         taxaRetorno: 0,
@@ -106,7 +211,7 @@ export default function Relatorios() {
                 // 1. All closed orders for the year
                 const { data: orders } = await supabase
                     .from('orders')
-                    .select('id, total_amount, closed_at, scheduled_at, created_at, professional_id, payment_method, client_id')
+                    .select('id, total_amount, closed_at, scheduled_at, created_at, professional_id, payment_method, client_id, order_items(name, price, quantity, item_type)')
                     .eq('barbershop_id', barbershopId)
                     .eq('status', 'closed')
                     .gte('closed_at', startOfYear)
@@ -169,10 +274,14 @@ export default function Relatorios() {
                     crescimentoMM = 100;
                 }
 
-                // ═══ KPI: Clientes Hoje ═══
-                const hoje = new Date().toLocaleDateString();
-                const comandasHoje = allOrders.filter(o => o.closed_at && new Date(o.closed_at).toLocaleDateString() === hoje);
-                const clientesHoje = comandasHoje.length;
+                // ═══ Clientes Novos (fetch from clients table) ═══
+                const { data: newClients } = await supabase
+                    .from('clients')
+                    .select('id, name, phone, created_at')
+                    .eq('barbershop_id', barbershopId)
+                    .gte('created_at', startOfMonth)
+                    .lte('created_at', endOfMonth);
+                setClientesNovos(newClients || []);
 
                 // ═══ KPI: Comandas Mês ═══
                 const comandasMes = currentMonthOrders.length;
@@ -204,11 +313,13 @@ export default function Relatorios() {
                 const clientesFieis = clientesDoMes.filter(cid => (totalVisitasMap[cid] || 0) > 1).length;
                 const taxaRetorno = clientesDoMes.length > 0 ? (clientesFieis / clientesDoMes.length) * 100 : 0;
 
-                // ═══ KPI: Horário de Pico (usa scheduled_at, fallback created_at) ═══
+                // ═══ KPI: Horário de Pico (usa scheduled_at, fallback created_at) — filtro horário comercial ═══
                 const hourCounts = {};
                 currentMonthOrders.forEach(o => {
                     const h = new Date(o.scheduled_at || o.created_at).getHours();
-                    hourCounts[h] = (hourCounts[h] || 0) + 1;
+                    if (h >= 8 && h <= 22) {
+                        hourCounts[h] = (hourCounts[h] || 0) + 1;
+                    }
                 });
                 let horarioPico = null;
                 let maxCount = 0;
@@ -225,7 +336,6 @@ export default function Relatorios() {
                 setKpis({
                     faturamentoMes,
                     crescimentoMM,
-                    clientesHoje,
                     comandasMes,
                     ticketMedio,
                     taxaRetorno,
@@ -233,6 +343,7 @@ export default function Relatorios() {
                     mrr,
                     activeSubsCount,
                 });
+
 
                 // ═══ Monthly Revenue (bar chart) ═══
                 const revenueByMonth = Array.from({ length: 12 }, (_, i) => ({
@@ -319,6 +430,25 @@ export default function Relatorios() {
                 }));
                 const combined = [...entradas, ...saidas].sort((a, b) => new Date(b.data) - new Date(a.data));
                 setExtratoMovimentacoes(combined);
+
+                // ═══ Origem dos Agendamentos (todos status, mês selecionado) ═══
+                const { data: allMonthOrdersForOrigin } = await supabase
+                    .from('orders')
+                    .select('origin')
+                    .eq('barbershop_id', barbershopId)
+                    .gte('created_at', startOfMonth)
+                    .lte('created_at', endOfMonth);
+
+                const origemAll = allMonthOrdersForOrigin || [];
+                const origemApp = origemAll.filter(o => o.origin === 'app').length;
+                const origemRecepcao = origemAll.filter(o => o.origin === 'reception').length;
+                setOrigemData({ total: origemAll.length, app: origemApp, reception: origemRecepcao });
+
+                // ═══ Lift data for drill-down modal ═══
+                setOrdersDoMes(currentMonthOrders);
+                setClientMapState(clientMap);
+                setProMapState(proMap);
+                setTotalVisitasMapState(totalVisitasMap);
 
             } catch (err) {
                 console.error('Erro ao buscar relatórios:', err);
@@ -420,7 +550,10 @@ export default function Relatorios() {
                             {/* ═══ Top KPIs (always visible) ═══ */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 {/* Faturamento Mês + Crescimento M/M */}
-                                <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
+                                <div
+                                    className="bg-slate-800 rounded-2xl border border-slate-700 p-5 cursor-pointer hover:ring-2 hover:ring-slate-600 transition-all"
+                                    onClick={() => setDetailsModal({ open: true, type: 'orders', title: `Faturamento — ${periodLabel}`, data: ordersDoMes })}
+                                >
                                     <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Faturamento — {periodLabel}</p>
                                     <p className="text-2xl font-bold text-emerald-400 mt-1">{formatBRL(kpis.faturamentoMes)}</p>
                                     {kpis.crescimentoMM !== null && (
@@ -440,14 +573,20 @@ export default function Relatorios() {
                                         </div>
                                     )}
                                 </div>
-                                {/* Clientes Hoje */}
-                                <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
-                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clientes Hoje</p>
-                                    <p className="text-2xl font-bold text-blue-400 mt-1">{kpis.clientesHoje}</p>
-                                    <p className="text-[10px] text-slate-600 mt-1">Comandas fechadas hoje</p>
+                                {/* Clientes Novos */}
+                                <div
+                                    className="bg-slate-800 rounded-2xl border border-slate-700 p-5 cursor-pointer hover:ring-2 hover:ring-slate-600 transition-all"
+                                    onClick={() => setDetailsModal({ open: true, type: 'clientes_novos', title: `Clientes Novos — ${periodLabel}`, data: clientesNovos })}
+                                >
+                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clientes Novos — {periodLabel}</p>
+                                    <p className="text-2xl font-bold text-blue-400 mt-1">{clientesNovos.length}</p>
+                                    <p className="text-[10px] text-slate-600 mt-1">Cadastrados no período</p>
                                 </div>
                                 {/* Comandas do Mês */}
-                                <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
+                                <div
+                                    className="bg-slate-800 rounded-2xl border border-slate-700 p-5 cursor-pointer hover:ring-2 hover:ring-slate-600 transition-all"
+                                    onClick={() => setDetailsModal({ open: true, type: 'orders', title: `Comandas — ${periodLabel}`, data: ordersDoMes })}
+                                >
                                     <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Comandas — {periodLabel}</p>
                                     <p className="text-2xl font-bold text-amber-400 mt-1">{kpis.comandasMes}</p>
                                     <p className="text-[10px] text-slate-600 mt-1">Fechadas no período</p>
@@ -462,7 +601,18 @@ export default function Relatorios() {
                                     {/* KPI highlight row */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {/* Taxa de Retorno */}
-                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5">
+                                        <div
+                                            className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5 cursor-pointer hover:ring-2 hover:ring-slate-600 transition-all"
+                                            onClick={() => {
+                                                // Build return-rate drill-down data
+                                                const clientesDoMesSet = new Set();
+                                                ordersDoMes.forEach(o => { if (o.client_id) clientesDoMesSet.add(o.client_id); });
+                                                const retornoData = [...clientesDoMesSet]
+                                                    .filter(cid => (totalVisitasMapState[cid] || 0) > 1)
+                                                    .map(cid => ({ id: cid, nome: clientMapState[cid] || 'Cliente avulso', visitas: totalVisitasMapState[cid] || 0 }));
+                                                setDetailsModal({ open: true, type: 'taxa_retorno', title: `Taxa de Retorno — ${periodLabel}`, data: retornoData });
+                                            }}
+                                        >
                                             <div className="w-14 h-14 rounded-2xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
                                                 <svg className="w-7 h-7 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
@@ -470,7 +620,7 @@ export default function Relatorios() {
                                             </div>
                                             <div>
                                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Taxa de Retorno</p>
-                                                <p className="text-3xl font-bold text-violet-400">{kpis.taxaRetorno.toFixed(0)}%</p>
+                                                <p className="text-3xl font-bold text-violet-400">{(isFinite(kpis.taxaRetorno) ? kpis.taxaRetorno : 0).toFixed(0)}%</p>
                                                 <p className="text-[10px] text-slate-600 mt-0.5">Clientes com +1 visita no ano</p>
                                             </div>
                                         </div>
@@ -573,9 +723,83 @@ export default function Relatorios() {
                                             <div>
                                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Horário Mais Movimentado</p>
                                                 <p className="text-3xl font-bold text-amber-400">
-                                                    {kpis.horarioPico !== null ? `${String(kpis.horarioPico).padStart(2, '0')}:00` : '—'}
+                                                    {kpis.horarioPico != null && !isNaN(kpis.horarioPico) ? `${String(kpis.horarioPico).padStart(2, '0')}:00` : '--:--'}
                                                 </p>
                                                 <p className="text-[10px] text-slate-600 mt-0.5">Pico de atendimento em {periodLabel}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Origem dos Agendamentos — Mês Selecionado */}
+                                    <div className="grid grid-cols-1 gap-4">
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6">
+                                            <div className="flex items-center gap-3 mb-5">
+                                                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 flex items-center justify-center flex-shrink-0">
+                                                    <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-sm font-semibold text-slate-100">Origem dos Agendamentos — {periodLabel}</h3>
+                                                    <p className="text-[10px] text-slate-500 mt-0.5">Distribuição por canal de entrada</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="text-center mb-5">
+                                                <p className="text-4xl font-bold text-slate-100">{origemData.total}</p>
+                                                <p className="text-xs text-slate-500 mt-1">Total de agendamentos</p>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                {/* App */}
+                                                {(() => {
+                                                    const appPct = origemData.total > 0 ? ((origemData.app / origemData.total) * 100) : 0;
+                                                    return (
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-1.5">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                                                                    <span className="text-sm text-slate-300 font-medium">App</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-sm font-bold text-emerald-400">{origemData.app}</span>
+                                                                    <span className="text-xs text-slate-500">({appPct.toFixed(1)}%)</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="w-full bg-slate-900 rounded-full h-2.5">
+                                                                <div
+                                                                    className="h-2.5 rounded-full bg-emerald-500 transition-all duration-500"
+                                                                    style={{ width: `${Math.min(appPct, 100)}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+
+                                                {/* Recepção */}
+                                                {(() => {
+                                                    const recPct = origemData.total > 0 ? ((origemData.reception / origemData.total) * 100) : 0;
+                                                    return (
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-1.5">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+                                                                    <span className="text-sm text-slate-300 font-medium">Recepção</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-sm font-bold text-blue-400">{origemData.reception}</span>
+                                                                    <span className="text-xs text-slate-500">({recPct.toFixed(1)}%)</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="w-full bg-slate-900 rounded-full h-2.5">
+                                                                <div
+                                                                    className="h-2.5 rounded-full bg-blue-500 transition-all duration-500"
+                                                                    style={{ width: `${Math.min(recPct, 100)}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     </div>
@@ -596,7 +820,18 @@ export default function Relatorios() {
                                                     const maxTotal = barberPerformance[0]?.total || 1;
                                                     const pct = (b.total / maxTotal) * 100;
                                                     return (
-                                                        <div key={i}>
+                                                        <div
+                                                            key={i}
+                                                            className="cursor-pointer hover:bg-slate-700/30 rounded-xl p-2 -mx-2 transition-all"
+                                                            onClick={() => {
+                                                                const barberOrders = ordersDoMes.filter(o => proMapState[o.professional_id] === b.nome);
+                                                                const enriched = barberOrders.map(o => ({
+                                                                    ...o,
+                                                                    clienteNome: clientMapState[o.client_id] || 'Cliente avulso',
+                                                                }));
+                                                                setDetailsModal({ open: true, type: 'barbeiro', title: `Atendimentos — ${b.nome} — ${periodLabel}`, data: enriched });
+                                                            }}
+                                                        >
                                                             <div className="flex items-center justify-between mb-1">
                                                                 <span className="text-sm text-slate-300 font-medium">{b.nome}</span>
                                                                 <div className="flex items-center gap-3">
@@ -768,6 +1003,75 @@ export default function Relatorios() {
                     )}
                 </div>
             </main>
+
+            {/* ══════════ MODAL: Drill-Down de Detalhes ══════════ */}
+            {detailsModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDetailsModal({ open: false, type: '', title: '', data: [] })} />
+                    <div className="relative bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 flex-shrink-0">
+                            <h3 className="text-base font-semibold text-slate-100">{detailsModal.title}</h3>
+                            <button onClick={() => setDetailsModal({ open: false, type: '', title: '', data: [] })} className="text-slate-500 hover:text-slate-300 transition-colors">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        {/* Body */}
+                        <div className="flex-1 overflow-y-auto px-6 py-4">
+                            {detailsModal.data.length === 0 ? (
+                                <div className="text-center py-12 text-slate-500 text-sm">Nenhum dado encontrado.</div>
+                            ) : detailsModal.type === 'orders' ? (
+                                /* ── Orders / Comandas (Expandable Accordion) ── */
+                                <OrdersAccordion data={detailsModal.data} clientMap={clientMapState} proMap={proMapState} showBarbeiro={true} />
+                            ) : detailsModal.type === 'clientes_novos' ? (
+                                /* ── Clientes Novos ── */
+                                <div className="space-y-2">
+                                    {detailsModal.data.map((c, idx) => {
+                                        const d = c.created_at ? new Date(c.created_at) : null;
+                                        const dataStr = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : '—';
+                                        return (
+                                            <div key={idx} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/50 border border-slate-700/40">
+                                                <div>
+                                                    <p className="text-sm font-medium text-slate-200">{c.name || 'Sem nome'}</p>
+                                                    <p className="text-[11px] text-slate-500">{c.phone || 'Sem contato'}</p>
+                                                </div>
+                                                <span className="text-xs text-slate-400">{dataStr}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : detailsModal.type === 'taxa_retorno' ? (
+                                /* ── Taxa de Retorno ── */
+                                <div className="space-y-2">
+                                    {detailsModal.data.map((c, idx) => (
+                                        <div key={idx} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/50 border border-slate-700/40">
+                                            <p className="text-sm font-medium text-slate-200">{c.nome}</p>
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-violet-500/10 text-violet-400 ring-1 ring-inset ring-violet-500/20">
+                                                {c.visitas} visitas totais
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : detailsModal.type === 'barbeiro' ? (
+                                /* ── Barbeiro Drill-Down (Expandable Accordion) ── */
+                                <OrdersAccordion data={detailsModal.data} clientMap={clientMapState} proMap={proMapState} showBarbeiro={false} />
+                            ) : null}
+                        </div>
+                        {/* Footer */}
+                        <div className="px-6 py-3 border-t border-slate-700 flex-shrink-0 flex items-center justify-between">
+                            <span className="text-xs text-slate-500">{detailsModal.data.length} registro(s)</span>
+                            <button
+                                onClick={() => setDetailsModal({ open: false, type: '', title: '', data: [] })}
+                                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-lg transition-colors"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
