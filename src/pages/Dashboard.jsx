@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import Drawer, { DrawerTable } from '../components/Drawer';
@@ -150,9 +151,11 @@ function ChartModal({ open, onClose, data, maxRevenue }) {
 /* ═══════════════════════════════════════════ */
 export default function Dashboard() {
     const { loading, data } = useDashboardData();
+    const navigate = useNavigate();
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [drawerType, setDrawerType] = useState(null);
     const [isChartModalOpen, setIsChartModalOpen] = useState(false);
+    const [detailModal, setDetailModal] = useState({ open: false, title: '', items: [] });
 
     function openDrawer(type) {
         setDrawerType(type);
@@ -377,15 +380,17 @@ export default function Dashboard() {
                             />
                             <MiniCard
                                 icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>}
-                                label="No-shows hoje"
+                                label="Não compareceu"
                                 value={data.funnel?.noShowCount || 0}
                                 color="red"
+                                onClick={() => setDetailModal({ open: true, title: 'Não Compareceu', items: data.funnel?.listaNaoCompareceuHoje || [] })}
                             />
                             <MiniCard
                                 icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>}
                                 label="Cancelamentos hoje"
                                 value={data.funnel?.canceledCount || 0}
                                 color="amber"
+                                onClick={() => setDetailModal({ open: true, title: 'Cancelamentos', items: data.funnel?.listaCanceladosHoje || [] })}
                             />
                             <MiniCard
                                 icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 15.546c-.523 0-1.046.151-1.5.454a2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0A1.5 1.5 0 003 17.25v.878A2.25 2.25 0 005.25 20.25h13.5A2.25 2.25 0 0021 18.128v-.582zM21 15.546V9a3 3 0 00-3-3h-1.172a3 3 0 01-2.121-.879l-.83-.828A1 1 0 0013.172 4H10.83a1 1 0 00-.707.293l-.83.828A3 3 0 017.172 6H6a3 3 0 00-3 3v6.546" /></svg>}
@@ -480,6 +485,10 @@ export default function Dashboard() {
                 <DrawerTable
                     columns={currentDrawer.columns || []}
                     data={currentDrawer.data || []}
+                    onRowClick={drawerType === 'comandasAbertas' ? (row) => {
+                        setDrawerOpen(false);
+                        if (row._id) navigate(`/pdv/${row._id}`);
+                    } : undefined}
                 />
             </Drawer>
 
@@ -490,6 +499,51 @@ export default function Dashboard() {
                 data={last7Days}
                 maxRevenue={maxRevenue}
             />
+
+            {/* ─── MODAL DETAIL (Não Compareceu / Cancelamentos) ─── */}
+            {detailModal.open && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDetailModal({ open: false, title: '', items: [] })} />
+                    <div className="relative bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+                            <h3 className="text-base font-semibold text-slate-100">{detailModal.title}</h3>
+                            <button onClick={() => setDetailModal({ open: false, title: '', items: [] })} className="text-slate-500 hover:text-slate-300 transition-colors">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        {/* Body */}
+                        <div className="flex-1 overflow-y-auto px-6 py-4">
+                            {detailModal.items.length > 0 ? (
+                                <div className="space-y-2">
+                                    {detailModal.items.map((item, i) => (
+                                        <div key={i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/50 border border-slate-700/40 hover:border-slate-600 transition-colors">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-slate-200 truncate">{item.cliente}</p>
+                                                <p className="text-[11px] text-slate-500">{item.profissional}</p>
+                                            </div>
+                                            <div className="text-right flex-shrink-0 ml-3">
+                                                <p className="text-sm font-bold text-slate-300">{item.horario}</p>
+                                                <p className="text-[10px] text-slate-600">{item.data}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12">
+                                    <svg className="w-12 h-12 text-slate-700 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <p className="text-sm text-slate-500">Nenhum registro para exibir</p>
+                                    <p className="text-xs text-slate-600 mt-1">Tudo certo por aqui ✓</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

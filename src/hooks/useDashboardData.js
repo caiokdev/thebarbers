@@ -1,9 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
 export default function useDashboardData() {
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
+    const [refetchKey, setRefetchKey] = useState(0);
+    const location = useLocation();
+
+    // Re-fetch when window regains focus (silent — no loading spinner)
+    useEffect(() => {
+        function handleFocus() { setRefetchKey(k => k + 1); }
+        window.addEventListener('focus', handleFocus);
+        return () => window.removeEventListener('focus', handleFocus);
+    }, []);
 
     useEffect(() => {
         async function fetchAll() {
@@ -67,13 +77,14 @@ export default function useDashboardData() {
                         .eq('status', 'error'),
                 ]);
 
-                // --- Variáveis de data (Full ISO timestamps para Supabase) ---
+                // --- Variáveis de data (UTC ISO strings para comparar com closed_at) ---
                 const today = new Date();
                 const localDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-                // Timestamps explícitos para "hoje" (usando string local para evitar offset UTC)
-                const startOfDayISO = `${localDate(today)}T00:00:00`;
-                const endOfDayISO = `${localDate(today)}T23:59:59.999`;
+                // Timestamps corretos: converte meia-noite LOCAL → UTC ISO string
+                // Ex: 2026-02-28 00:00:00 BRT (UTC-3) → 2026-02-28T03:00:00.000Z
+                const startOfDayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).toISOString();
+                const endOfDayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).toISOString();
 
                 // Para queries que usam campos date (não timestamp)
                 const todayISO = localDate(today);
@@ -128,7 +139,7 @@ export default function useDashboardData() {
                 // --- DRILL-DOWN: Comandas Abertas (Detalhes) ---
                 const { data: openOrdersDetail } = await supabase
                     .from('orders')
-                    .select('total_amount, created_at, client_id, professional_id')
+                    .select('id, total_amount, created_at, client_id, professional_id')
                     .eq('barbershop_id', bId)
                     .eq('status', 'open')
                     .order('created_at', { ascending: false });
@@ -147,6 +158,7 @@ export default function useDashboardData() {
                 const detalheComandasAbertas = (openOrdersDetail || []).map(o => {
                     const d = new Date(o.created_at);
                     return {
+                        _id: o.id,
                         hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
                         cliente: ooClientMap[o.client_id] || 'Sem nome',
                         barbeiro: ooProMap[o.professional_id] || 'Sem nome',
@@ -166,11 +178,11 @@ export default function useDashboardData() {
                 );
                 const activeSubsCount = (activePlans || []).length;
 
-                // --- Faturamento do Mês (Local timestamps — same approach as day query) ---
-                const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0);
+                // --- Faturamento do Mês (UTC ISO — same approach as day query) ---
+                const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
                 const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
-                const startOfMonthISO = `${localDate(startOfMonth)}T00:00:00`;
-                const endOfMonthISO = `${localDate(endOfMonth)}T23:59:59.999`;
+                const startOfMonthISO = startOfMonth.toISOString();
+                const endOfMonthISO = endOfMonth.toISOString();
 
                 const { data: monthOrders } = await supabase
                     .from('orders')
@@ -204,7 +216,7 @@ export default function useDashboardData() {
                     const { data: p } = await supabase.from('profiles').select('id, name').in('id', cmProIds);
                     (p || []).forEach(x => { cmProMap[x.id] = x.name; });
                 }
-                const statusLabels = { closed: 'Fechado', open: 'Aberto', scheduled: 'Agendado', no_show: 'No-show', canceled: 'Cancelado' };
+                const statusLabels = { closed: 'Fechado', open: 'Aberto', scheduled: 'Agendado', 'no-show': 'No-show', canceled: 'Cancelado' };
                 const detalheConversaoMes = (allMonthOrders || []).map(o => {
                     const d = new Date(o.created_at);
                     return {
@@ -449,7 +461,7 @@ export default function useDashboardData() {
                             if (item.item_type === 'service') clientMap[cId].servicos += qty;
                             if (item.item_type === 'product') clientMap[cId].produtos += qty;
                         });
-                        if (order.status === 'closed' || order.status === 'completed') {
+                        if (order.status === 'closed') {
                             clientMap[cId].total += parseFloat(order.total_amount || 0);
                         }
                     });
@@ -582,7 +594,7 @@ export default function useDashboardData() {
                     .from('orders')
                     .select('id, created_at, client_id')
                     .eq('barbershop_id', bId)
-                    .or('status.eq.closed,status.eq.completed')
+                    .eq('status', 'closed')
                     .order('created_at', { ascending: false });
 
                 const recompraList = [];
@@ -710,22 +722,50 @@ export default function useDashboardData() {
 
                 clientesEvasao.sort((a, b) => b.diasUltimaVisita - a.diasUltimaVisita);
 
-                // --- 🔥 FUNIL DE AGENDAMENTOS (mês atual) ---
+                // --- 🔥 FUNIL DE AGENDAMENTOS (mês atual — por scheduled_at) ---
                 const { data: allFunnelOrders } = await supabase
                     .from('orders')
-                    .select('status')
+                    .select('status, client_id, professional_id, scheduled_at')
                     .eq('barbershop_id', bId)
-                    .gte('created_at', startOfMonthISO)
-                    .lte('created_at', endOfMonthISO);
+                    .gte('scheduled_at', startOfMonthISO)
+                    .lte('scheduled_at', endOfMonthISO);
 
                 const funnelTotal = (allFunnelOrders || []).length;
-                let funnelClosed = 0, funnelNoShow = 0, funnelCanceled = 0, funnelScheduled = 0;
+                let funnelClosed = 0, funnelNoShow = 0, funnelCanceled = 0, funnelScheduled = 0, funnelOpen = 0;
+                const noShowOrders = [], canceledOrders = [];
                 (allFunnelOrders || []).forEach(o => {
                     if (o.status === 'closed') funnelClosed++;
-                    else if (o.status === 'no_show') funnelNoShow++;
-                    else if (o.status === 'canceled') funnelCanceled++;
+                    else if (o.status === 'no-show') { funnelNoShow++; noShowOrders.push(o); }
+                    else if (o.status === 'canceled') { funnelCanceled++; canceledOrders.push(o); }
                     else if (o.status === 'scheduled') funnelScheduled++;
+                    else if (o.status === 'open') funnelOpen++;
                 });
+
+                // Resolve names for no-show/canceled detail lists
+                const detailClientIds = [...new Set([...noShowOrders, ...canceledOrders].map(o => o.client_id).filter(Boolean))];
+                const detailProIds = [...new Set([...noShowOrders, ...canceledOrders].map(o => o.professional_id).filter(Boolean))];
+                let detailClientMap = {}, detailProMap = {};
+                if (detailClientIds.length > 0) {
+                    const { data: dc } = await supabase.from('clients').select('id, name').in('id', detailClientIds);
+                    (dc || []).forEach(c => { detailClientMap[c.id] = c.name; });
+                }
+                if (detailProIds.length > 0) {
+                    const { data: dp } = await supabase.from('profiles').select('id, name').in('id', detailProIds);
+                    (dp || []).forEach(p => { detailProMap[p.id] = p.name; });
+                }
+
+                const enrichDetail = (arr) => arr.map(o => {
+                    const d = o.scheduled_at ? new Date(o.scheduled_at) : null;
+                    return {
+                        cliente: detailClientMap[o.client_id] || 'Cliente Avulso',
+                        profissional: detailProMap[o.professional_id] || 'Sem nome',
+                        horario: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—',
+                        data: d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` : '—',
+                    };
+                });
+
+                const listaNaoCompareceuHoje = enrichDetail(noShowOrders);
+                const listaCanceladosHoje = enrichDetail(canceledOrders);
 
                 const funnel = {
                     total: funnelTotal,
@@ -736,6 +776,8 @@ export default function useDashboardData() {
                     closed: funnelClosed,
                     noShowCount: funnelNoShow,
                     canceledCount: funnelCanceled,
+                    listaNaoCompareceuHoje,
+                    listaCanceladosHoje,
                 };
 
                 // --- NOVO: Próximos Atendimentos por Profissional ---
@@ -865,7 +907,7 @@ export default function useDashboardData() {
         }
 
         fetchAll();
-    }, []);
+    }, [location.pathname, refetchKey]);
 
     return { loading, data };
 }

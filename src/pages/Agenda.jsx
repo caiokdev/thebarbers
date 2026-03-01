@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 
@@ -45,10 +46,19 @@ function formatCurrency(v) {
     return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',');
 }
 
+const STATUS_CONFIG = {
+    scheduled: { label: 'Agendado', bg: 'bg-blue-500/15', text: 'text-blue-400', border: 'border-blue-500/30' },
+    confirmed: { label: 'Confirmado', bg: 'bg-cyan-500/15', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+    open: { label: 'Aberto', bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/30' },
+    completed: { label: 'Concluído', bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+    cancelled: { label: 'Cancelado', bg: 'bg-rose-500/15', text: 'text-rose-400', border: 'border-rose-500/30' },
+};
+
 /* ═══════════════════════════════════════════════════════════════
    AGENDA COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function Agenda() {
+    const navigate = useNavigate();
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [professionals, setProfessionals] = useState([]);
     const [clients, setClients] = useState([]);
@@ -57,10 +67,14 @@ export default function Agenda() {
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // Modal
+    // Creation Modal
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedSlot, setSelectedSlot] = useState({ professionalId: '', time: '' });
     const [saving, setSaving] = useState(false);
+
+    // Details Modal
+    const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
 
     // Now Line
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -130,9 +144,13 @@ export default function Agenda() {
     // ── Fetch day appointments ──
     const fetchAppointments = useCallback(async () => {
         if (!barbershopId) return;
-        const dateStr = formatDateInput(selectedDate);
-        const startOfDay = `${dateStr}T00:00:00`;
-        const endOfDay = `${dateStr}T23:59:59.999`;
+        // Build LOCAL midnight → 23:59 as proper UTC ISO strings so Supabase
+        // compares against the correct wall-clock day in this timezone.
+        const y = selectedDate.getFullYear();
+        const mo = selectedDate.getMonth();
+        const d = selectedDate.getDate();
+        const startOfDay = new Date(y, mo, d, 0, 0, 0, 0).toISOString();
+        const endOfDay = new Date(y, mo, d, 23, 59, 59, 999).toISOString();
 
         const { data } = await supabase
             .from('orders')
@@ -195,9 +213,17 @@ export default function Agenda() {
         return m;
     }, [clients]);
 
+    // Professional lookup
+    const proMap = useMemo(() => {
+        const m = {};
+        professionals.forEach(p => { m[p.id] = p.name; });
+        return m;
+    }, [professionals]);
+
     // ── Modal handlers ──
     const openModalEmpty = () => { setSelectedSlot({ professionalId: '', time: '' }); setIsModalOpen(true); };
     const openModalFromCell = (professionalId, time) => { setSelectedSlot({ professionalId, time }); setIsModalOpen(true); };
+    const openDetailsModal = (order) => { setSelectedOrderDetails(order); setIsDetailsModalOpen(true); };
 
     return (
         <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
@@ -216,12 +242,6 @@ export default function Agenda() {
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
-                        <div className="hidden md:flex items-center gap-2 bg-slate-700/50 rounded-xl px-4 py-2 text-sm text-slate-400 border border-slate-600">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            Buscar...
-                        </div>
                         <button className="relative p-2 text-slate-400 hover:text-slate-200 transition-colors">
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -295,13 +315,13 @@ export default function Agenda() {
                                                 return (
                                                     <div
                                                         key={slotKey}
-                                                        onClick={() => !appt && openModalFromCell(pro.id, time)}
+                                                        onClick={() => appt ? openDetailsModal(appt) : openModalFromCell(pro.id, time)}
                                                         className={`h-14 border-r border-slate-700/30 relative transition-all duration-150 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'
-                                                            } ${appt ? '' : 'cursor-pointer group hover:bg-emerald-500/5 hover:border-emerald-500/20'}`}
+                                                            } ${appt ? 'cursor-pointer' : 'cursor-pointer group hover:bg-emerald-500/5 hover:border-emerald-500/20'}`}
                                                         title={appt ? `${clientMap[appt.client_id] || 'Cliente'} — ${formatCurrency(appt.total_amount)}` : `${time} — ${pro.name}`}
                                                     >
                                                         {appt ? (
-                                                            <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30`}>
+                                                            <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center cursor-pointer hover:ring-2 ring-emerald-400 transition-all ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30`}>
                                                                 <p className="text-xs font-semibold text-slate-100 truncate">{clientMap[appt.client_id] || 'Cliente'}</p>
                                                                 <p className="text-[10px] text-slate-400 truncate">{formatCurrency(appt.total_amount)}</p>
                                                             </div>
@@ -332,7 +352,7 @@ export default function Agenda() {
                 </div>
             </main>
 
-            {/* ═══════ MODAL ═══════ */}
+            {/* ═══════ CREATION MODAL ═══════ */}
             {isModalOpen && (
                 <AppointmentModal
                     professionals={professionals}
@@ -341,10 +361,43 @@ export default function Agenda() {
                     selectedDate={selectedDate}
                     selectedSlot={selectedSlot}
                     barbershopId={barbershopId}
+                    appointments={appointments}
                     saving={saving}
                     setSaving={setSaving}
                     onClose={() => setIsModalOpen(false)}
                     onSaved={() => { setIsModalOpen(false); fetchAppointments(); }}
+                />
+            )}
+
+            {/* ═══════ DETAILS MODAL ═══════ */}
+            {isDetailsModalOpen && selectedOrderDetails && (
+                <OrderDetailsModal
+                    order={selectedOrderDetails}
+                    clientMap={clientMap}
+                    proMap={proMap}
+                    onClose={() => { setIsDetailsModalOpen(false); setSelectedOrderDetails(null); }}
+                    onCancel={async () => {
+                        const { error } = await supabase
+                            .from('orders')
+                            .update({ status: 'canceled' })
+                            .eq('id', selectedOrderDetails.id);
+                        if (error) { alert(`Erro ao cancelar: ${error.message}`); return; }
+                        setIsDetailsModalOpen(false);
+                        setSelectedOrderDetails(null);
+                        fetchAppointments();
+                        alert('Agendamento cancelado com sucesso.');
+                    }}
+                    onOpenComanda={async () => {
+                        const { error } = await supabase
+                            .from('orders')
+                            .update({ status: 'open' })
+                            .eq('id', selectedOrderDetails.id);
+                        if (error) { alert(`Erro ao abrir comanda: ${error.message}`); return; }
+                        setIsDetailsModalOpen(false);
+                        setSelectedOrderDetails(null);
+                        fetchAppointments();
+                        navigate(`/pdv/${selectedOrderDetails.id}`);
+                    }}
                 />
             )}
         </div>
@@ -356,7 +409,7 @@ export default function Agenda() {
    ═══════════════════════════════════════════════════════════════ */
 function AppointmentModal({
     professionals, clients, catalog, selectedDate, selectedSlot,
-    barbershopId, saving, setSaving, onClose, onSaved,
+    barbershopId, appointments, saving, setSaving, onClose, onSaved,
 }) {
     const [professionalId, setProfessionalId] = useState(selectedSlot.professionalId || '');
     const [date, setDate] = useState(formatDateInput(selectedDate));
@@ -367,6 +420,12 @@ function AppointmentModal({
     const [cartItems, setCartItems] = useState([]);
     const [catalogSelect, setCatalogSelect] = useState('');
 
+    // Avulso mode
+    const [isAvulso, setIsAvulso] = useState(false);
+    const [avulsoValue, setAvulsoValue] = useState('');
+    const [avulsoNotes, setAvulsoNotes] = useState('');
+    const [origin, setOrigin] = useState('reception');
+
     // Client search
     const filteredClients = useMemo(() => {
         if (!clientSearch.trim()) return clients.slice(0, 8);
@@ -375,9 +434,10 @@ function AppointmentModal({
     }, [clientSearch, clients]);
 
     // Total
-    const totalAmount = useMemo(() =>
-        cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
-        [cartItems]);
+    const totalAmount = useMemo(() => {
+        if (isAvulso) return parseFloat(avulsoValue) || 0;
+        return cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    }, [cartItems, isAvulso, avulsoValue]);
 
     // Cart operations
     const addToCart = (catalogId) => {
@@ -413,9 +473,35 @@ function AppointmentModal({
             return;
         }
 
+        // ── Build a LOCAL Date object from the form inputs ──
+        // Using the multi-arg constructor guarantees local timezone interpretation.
+        // Example: user picks "13:00" in UTC-3 → localDate.getHours() === 13
+        //          .toISOString() → "…T16:00:00.000Z" (correct UTC representation)
+        const [y, mo, d] = date.split('-').map(Number);
+        const [h, mi] = time.split(':').map(Number);
+        const localDate = new Date(y, mo - 1, d, h, mi, 0);
+
+        // ── Double-booking check (against loaded appointments) ──
+        const conflict = (appointments || []).find(a => {
+            if (a.professional_id !== professionalId) return false;
+            const existing = new Date(a.scheduled_at);
+            return existing.getFullYear() === localDate.getFullYear()
+                && existing.getMonth() === localDate.getMonth()
+                && existing.getDate() === localDate.getDate()
+                && existing.getHours() === localDate.getHours()
+                && existing.getMinutes() === localDate.getMinutes();
+        });
+
+        if (conflict) {
+            alert('Este profissional já possui um agendamento neste horário.');
+            return;
+        }
+
         setSaving(true);
         try {
-            const scheduledAt = `${date}T${time}:00`;
+            // Send as ISO string — Supabase stores correct UTC instant,
+            // and JS new Date(...).getHours() will return correct local hours on read-back.
+            const scheduledAt = localDate.toISOString();
 
             const { data: order, error: orderError } = await supabase
                 .from('orders')
@@ -426,15 +512,16 @@ function AppointmentModal({
                     scheduled_at: scheduledAt,
                     total_amount: totalAmount,
                     status: 'scheduled',
-                    origin: 'reception',
+                    origin: origin,
+                    ...(isAvulso && avulsoNotes ? { notes: avulsoNotes } : {}),
                 })
                 .select('id')
                 .single();
 
             if (orderError) throw orderError;
 
-            // Insert order_items
-            if (cartItems.length > 0 && order?.id) {
+            // Insert order_items (skip if avulso)
+            if (!isAvulso && cartItems.length > 0 && order?.id) {
                 const items = cartItems.map(ci => ({
                     order_id: order.id,
                     item_type: ci.type,
@@ -526,60 +613,113 @@ function AppointmentModal({
                         )}
                     </div>
 
-                    {/* ── Cart: Add Service/Product ── */}
+                    {/* Origin */}
                     <div>
-                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Serviços & Produtos</label>
-                        <select
-                            value={catalogSelect}
-                            onChange={e => addToCart(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer"
-                        >
-                            <option value="">Adicionar serviço ou produto...</option>
-                            {catalog.filter(c => c.type === 'service').length > 0 && (
-                                <optgroup label="Serviços">
-                                    {catalog.filter(c => c.type === 'service').map(c => (
-                                        <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
-                                    ))}
-                                </optgroup>
-                            )}
-                            {catalog.filter(c => c.type === 'product').length > 0 && (
-                                <optgroup label="Produtos">
-                                    {catalog.filter(c => c.type === 'product').map(c => (
-                                        <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
-                                    ))}
-                                </optgroup>
-                            )}
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Origem do Agendamento</label>
+                        <select value={origin} onChange={e => setOrigin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer">
+                            <option value="reception">Recepção</option>
+                            <option value="app">Aplicativo</option>
+                            <option value="whatsapp">WhatsApp</option>
+                            <option value="phone">Telefone</option>
                         </select>
                     </div>
 
-                    {/* ── Cart Items List ── */}
-                    {cartItems.length > 0 && (
-                        <div className="space-y-2">
-                            {cartItems.map(ci => (
-                                <div key={ci.id} className="flex items-center gap-3 bg-slate-900/60 rounded-xl px-4 py-2.5 border border-slate-700/50">
-                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ci.type === 'service' ? 'bg-blue-400' : 'bg-amber-400'}`} />
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-slate-200 truncate">{ci.name}</p>
-                                        <p className="text-[11px] text-slate-500">{formatCurrency(ci.price)} un.</p>
-                                    </div>
+                    {/* ── Avulso Toggle ── */}
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setIsAvulso(!isAvulso)}
+                            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${isAvulso ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                        >
+                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${isAvulso ? 'translate-x-5' : 'translate-x-0'}`} />
+                        </button>
+                        <span className="text-sm text-slate-300">Serviço Avulso / Não especificado</span>
+                    </div>
 
-                                    {/* Quantity controls */}
-                                    <div className="flex items-center gap-1.5">
-                                        <button
-                                            onClick={() => updateQty(ci.id, -1)}
-                                            className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
-                                        >−</button>
-                                        <span className="w-6 text-center text-sm font-semibold text-slate-100">{ci.quantity}</span>
-                                        <button
-                                            onClick={() => updateQty(ci.id, 1)}
-                                            className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
-                                        >+</button>
-                                    </div>
-
-                                    <p className="text-sm font-semibold text-slate-100 w-24 text-right">{formatCurrency(ci.price * ci.quantity)}</p>
-                                </div>
-                            ))}
+                    {isAvulso ? (
+                        /* ── Avulso Fields ── */
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Valor Estimado (opcional)</label>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={avulsoValue}
+                                    onChange={e => setAvulsoValue(e.target.value)}
+                                    placeholder="0,00"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Observação / Descrição</label>
+                                <textarea
+                                    value={avulsoNotes}
+                                    onChange={e => setAvulsoNotes(e.target.value)}
+                                    placeholder="Ex: Corte + algo a decidir..."
+                                    rows={2}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors resize-none"
+                                />
+                            </div>
                         </div>
+                    ) : (
+                        /* ── Cart: Add Service/Product ── */
+                        <>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Serviços & Produtos</label>
+                                <select
+                                    value={catalogSelect}
+                                    onChange={e => addToCart(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer"
+                                >
+                                    <option value="">Adicionar serviço ou produto...</option>
+                                    {catalog.filter(c => c.type === 'service').length > 0 && (
+                                        <optgroup label="Serviços">
+                                            {catalog.filter(c => c.type === 'service').map(c => (
+                                                <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
+                                            ))}
+                                        </optgroup>
+                                    )}
+                                    {catalog.filter(c => c.type === 'product').length > 0 && (
+                                        <optgroup label="Produtos">
+                                            {catalog.filter(c => c.type === 'product').map(c => (
+                                                <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
+                                            ))}
+                                        </optgroup>
+                                    )}
+                                </select>
+                            </div>
+
+                            {/* ── Cart Items List ── */}
+                            {cartItems.length > 0 && (
+                                <div className="space-y-2">
+                                    {cartItems.map(ci => (
+                                        <div key={ci.id} className="flex items-center gap-3 bg-slate-900/60 rounded-xl px-4 py-2.5 border border-slate-700/50">
+                                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ci.type === 'service' ? 'bg-blue-400' : 'bg-amber-400'}`} />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-slate-200 truncate">{ci.name}</p>
+                                                <p className="text-[11px] text-slate-500">{formatCurrency(ci.price)} un.</p>
+                                            </div>
+
+                                            {/* Quantity controls */}
+                                            <div className="flex items-center gap-1.5">
+                                                <button
+                                                    onClick={() => updateQty(ci.id, -1)}
+                                                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
+                                                >−</button>
+                                                <span className="w-6 text-center text-sm font-semibold text-slate-100">{ci.quantity}</span>
+                                                <button
+                                                    onClick={() => updateQty(ci.id, 1)}
+                                                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
+                                                >+</button>
+                                            </div>
+
+                                            <p className="text-sm font-semibold text-slate-100 w-24 text-right">{formatCurrency(ci.price * ci.quantity)}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
                     )}
 
                     {/* ── Total ── */}
@@ -599,6 +739,129 @@ function AppointmentModal({
                         {saving ? 'Salvando...' : 'Salvar Agendamento'}
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ORDER DETAILS MODAL — View appointment details
+   ═══════════════════════════════════════════════════════════════ */
+function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onOpenComanda }) {
+    const [actionLoading, setActionLoading] = useState(false);
+    const dt = new Date(order.scheduled_at);
+    const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+    const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.scheduled;
+    const statusLabel = order.status === 'open' ? 'Comanda Aberta' : statusCfg.label;
+    const clientName = clientMap[order.client_id] || 'Cliente';
+    const proName = proMap[order.professional_id] || 'Profissional';
+
+    const handleCancel = async () => {
+        if (!confirm('Tem certeza que deseja cancelar este agendamento?')) return;
+        setActionLoading(true);
+        await onCancel();
+        setActionLoading(false);
+    };
+
+    const handleOpenComanda = async () => {
+        setActionLoading(true);
+        await onOpenComanda();
+        setActionLoading(false);
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+            <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl shadow-black/40 mx-4" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-emerald-500/15 rounded-xl flex items-center justify-center">
+                            <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-100">{clientName}</h3>
+                            <p className="text-xs text-slate-500">Detalhes do agendamento</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span className={`inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-semibold ${statusCfg.bg} ${statusCfg.text} border ${statusCfg.border}`}>
+                            {statusLabel}
+                        </span>
+                        <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+                </div>
+
+                {/* Info Grid */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Data</p>
+                        <p className="text-sm font-semibold text-slate-100">{dateStr}</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Horário</p>
+                        <p className="text-sm font-semibold text-slate-100">{timeStr}</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Barbeiro</p>
+                        <p className="text-sm font-semibold text-slate-100">{proName}</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Valor</p>
+                        <p className="text-sm font-bold text-emerald-400">{formatCurrency(order.total_amount)}</p>
+                    </div>
+                </div>
+
+                {/* Order ID */}
+                <div className="bg-slate-900/40 rounded-lg px-4 py-2 mb-6 border border-slate-700/30">
+                    <p className="text-[11px] text-slate-500">ID do pedido: <span className="text-slate-400 font-mono">{order.id?.slice(0, 8)}...</span></p>
+                </div>
+
+                {/* Actions */}
+                {['canceled', 'closed'].includes(order.status) ? (
+                    <div className="pt-4 border-t border-slate-700">
+                        <p className="text-center text-sm text-slate-500 italic">Nenhuma ação disponível para este status.</p>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-3 pt-4 border-t border-slate-700">
+                        <button
+                            onClick={handleCancel}
+                            disabled={actionLoading || order.status === 'open'}
+                            className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border ${order.status === 'open'
+                                ? 'text-slate-500 bg-slate-800 border-slate-700 cursor-not-allowed opacity-50'
+                                : 'text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50'
+                                }`}
+                        >
+                            {actionLoading ? <div className="w-4 h-4 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin" /> : (
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            )}
+                            Cancelar Agendamento
+                        </button>
+                        <button
+                            onClick={order.status !== 'open' ? handleOpenComanda : undefined}
+                            disabled={actionLoading || order.status === 'open'}
+                            className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${order.status === 'open'
+                                ? 'text-amber-300 bg-amber-500/10 border border-amber-500/20 cursor-not-allowed opacity-70'
+                                : 'text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 disabled:opacity-50'
+                                }`}
+                        >
+                            {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
+                                order.status === 'open' ? (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                )
+                            )}
+                            {order.status === 'open' ? 'Comanda em Andamento' : 'Abrir Comanda / Checkout'}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
