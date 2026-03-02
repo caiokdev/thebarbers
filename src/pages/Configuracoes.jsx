@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
+import { useTheme } from '../context/ThemeContext';
 
 const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -29,6 +30,7 @@ const DEFAULT_HOURS = DAYS.map(d => ({
 }));
 
 export default function Configuracoes() {
+    const { theme, themeColor, updateThemeColor, THEME_COLORS } = useTheme();
     const [activeTab, setActiveTab] = useState('geral');
     const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -321,9 +323,31 @@ export default function Configuracoes() {
                                     </div>
                                 </div>
 
+                                {/* ── Color Picker ── */}
+                                <div className="mt-6 pt-5 border-t border-slate-700">
+                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Cor do Tema</label>
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        {Object.entries(THEME_COLORS).map(([key, t]) => (
+                                            <button
+                                                key={key}
+                                                onClick={() => barbershopId && updateThemeColor(key, barbershopId)}
+                                                className={`w-10 h-10 rounded-full ${t.bg} transition-all duration-200 flex items-center justify-center ${themeColor === key ? 'ring-2 ring-offset-2 ring-offset-slate-800 ring-white scale-110' : 'hover:scale-105 opacity-70 hover:opacity-100'}`}
+                                                title={key.charAt(0).toUpperCase() + key.slice(1)}
+                                            >
+                                                {themeColor === key && (
+                                                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[11px] text-slate-600 mt-2">A cor do tema será aplicada em toda a interface</p>
+                                </div>
+
                                 <div className="flex justify-end mt-6 pt-5 border-t border-slate-700">
                                     <button onClick={handleSaveShop} disabled={savingShop}
-                                        className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center gap-2">
+                                        className={`px-6 py-3 ${theme.bg} ${theme.bgHover} text-white text-sm font-semibold rounded-xl transition-colors shadow-lg ${theme.shadow} disabled:opacity-50 flex items-center gap-2`}>
                                         {savingShop && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                                         {savingShop ? 'Salvando...' : 'Salvar Dados'}
                                     </button>

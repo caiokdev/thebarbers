@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useTheme } from '../context/ThemeContext';
 
 const menuItems = [
     {
@@ -70,6 +71,7 @@ const menuItems = [
 ];
 
 export default function Sidebar() {
+    const { theme } = useTheme();
     const [shopName, setShopName] = useState('');
     const [adminName, setAdminName] = useState('');
     const [adminInitials, setAdminInitials] = useState('');
@@ -86,7 +88,6 @@ export default function Sidebar() {
                 if (shop) {
                     setShopName(shop.name || 'The Barbers');
 
-                    // Fetch admin profile
                     const { data: admin } = await supabase
                         .from('profiles')
                         .select('name')
@@ -105,26 +106,20 @@ export default function Sidebar() {
                         );
                     }
                 }
-            } catch (_) {
-                // silently handled
-            }
+            } catch (_) { }
         }
         fetchSidebarData();
 
-        // Listen for realtime changes on barbershops table
         const channel = supabase
             .channel('sidebar-barbershop-changes')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'barbershops' }, (payload) => {
-                if (payload.new?.name) {
-                    setShopName(payload.new.name);
-                }
+                if (payload.new?.name) setShopName(payload.new.name);
             })
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
     }, []);
 
-    // Derive display name parts
     const nameParts = shopName.split(' ');
     const mainName = nameParts.slice(0, -1).join(' ') || shopName;
     const subName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
@@ -134,7 +129,7 @@ export default function Sidebar() {
         <aside className="w-[260px] bg-slate-900 text-white h-full flex flex-col flex-shrink-0">
             {/* Logo */}
             <div className="h-[72px] flex items-center gap-3 px-6 border-b border-slate-800">
-                <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">
+                <div className={`w-9 h-9 ${theme.bg} rounded-xl flex items-center justify-center text-white font-bold text-sm`}>
                     {logoInitials}
                 </div>
                 <div>
@@ -152,7 +147,7 @@ export default function Sidebar() {
                         end={item.path === '/'}
                         className={({ isActive }) =>
                             `w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${isActive
-                                ? 'bg-emerald-500/15 text-emerald-400'
+                                ? `${theme.bgLight} ${theme.text}`
                                 : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                             }`
                         }

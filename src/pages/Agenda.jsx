@@ -120,8 +120,8 @@ export default function Agenda() {
                 setBarbershopId(shop.id);
 
                 const [barbersRes, clientsRes, productsRes] = await Promise.all([
-                    supabase.from('profiles').select('id, name, role')
-                        .eq('barbershop_id', shop.id).eq('role', 'barber').order('name'),
+                    supabase.from('professionals').select('id, name, specialty')
+                        .eq('barbershop_id', shop.id).order('name'),
                     supabase.from('clients').select('id, name, phone')
                         .eq('barbershop_id', shop.id).order('name'),
                     supabase.from('products').select('id, name, price, current_stock')
