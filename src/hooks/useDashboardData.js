@@ -77,16 +77,13 @@ export default function useDashboardData() {
                 const in30DaysISO = localDate(in30Days);
 
                 // --- REFATORAÇÃO: O CÉREBRO DO DASHBOARD ---
-                // Busca TODOS os agendamentos do mês + agendamentos abertos e separa no JS
-                const cutoff = new Date();
-                cutoff.setDate(cutoff.getDate() - 35); // 35 dias para pegar ultimos dias do mes passado e garantir cobrir o mes todo
-                const cutoffISO = cutoff.toISOString();
-
+                // Busca TODOS os agendamentos agendados para este mês + ou abertos independentemente (vamos focar no mês de agendamento por ora)
                 const { data: rawOrdersData } = await supabase
                     .from('orders')
                     .select('*, profiles!professional_id(name), clients!client_id(name, phone)')
                     .eq('barbershop_id', bId)
-                    .gte('created_at', cutoffISO);
+                    .gte('scheduled_at', startOfMonthISO)
+                    .lte('scheduled_at', endOfMonthISO);
 
                 const allOrdersRaw = rawOrdersData || [];
 
@@ -122,11 +119,14 @@ export default function useDashboardData() {
                     const status = o.status;
                     const amount = parseFloat(o.total_amount || 0);
 
-                    const isScheduledThisMonth = o.scheduled_at && o.scheduled_at >= startOfMonthISO && o.scheduled_at <= endOfMonthISO;
-                    const isScheduledToday = o.scheduled_at && o.scheduled_at >= startOfDayISO && o.scheduled_at <= endOfDayISO;
+                    // REGRA DE HOJE: comparar scheduled_at com data de hoje usando toLocaleDateString
+                    const isHoje = o.scheduled_at && new Date(o.scheduled_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
 
-                    const isClosedThisMonth = status === 'closed' && o.closed_at && o.closed_at >= startOfMonthISO && o.closed_at <= endOfMonthISO;
-                    const isClosedToday = status === 'closed' && o.closed_at && o.closed_at >= startOfDayISO && o.closed_at <= endOfDayISO;
+                    const isScheduledThisMonth = true; // A query já filtrou pelo mês em scheduled_at
+                    const isScheduledToday = isHoje;
+
+                    const isClosedThisMonth = status === 'closed';
+                    const isClosedToday = status === 'closed' && isHoje;
 
                     const isCreatedThisMonth = o.created_at && o.created_at >= startOfMonthISO && o.created_at <= endOfMonthISO;
 
@@ -151,7 +151,7 @@ export default function useDashboardData() {
                     // 2. Comandas Abertas (globais, independentes do mês)
                     if (status === 'open') {
                         openOrdersCount++;
-                        const d = new Date(o.created_at);
+                        const d = o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at);
                         detalheComandasAbertas.push({
                             _id: o.id,
                             hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
@@ -165,14 +165,16 @@ export default function useDashboardData() {
                     // 3. Faturamento Mês e Meta
                     if (isClosedThisMonth) {
                         faturamentoMes += amount;
-                        const dayKey = o.closed_at.split('T')[0];
-                        if (!dailyMetaMap[dayKey]) dailyMetaMap[dayKey] = 0;
-                        dailyMetaMap[dayKey] += amount;
+                        if (o.scheduled_at) {
+                            const dayKey = o.scheduled_at.split('T')[0];
+                            if (!dailyMetaMap[dayKey]) dailyMetaMap[dayKey] = 0;
+                            dailyMetaMap[dayKey] += amount;
+                        }
                     }
 
                     // Faturamento 7 dias
-                    if (status === 'closed' && o.closed_at) {
-                        const closedDateKey = o.closed_at.split('T')[0];
+                    if (status === 'closed' && o.scheduled_at) {
+                        const closedDateKey = o.scheduled_at.split('T')[0];
                         if (!last7DaysData[closedDateKey]) last7DaysData[closedDateKey] = 0;
                         last7DaysData[closedDateKey] += amount;
                     }
@@ -211,9 +213,10 @@ export default function useDashboardData() {
                         if (status === 'canceled') canceledOrdersToday.push(o);
 
                         // 6. Próximos Atendimentos (hoje, no futuro - TIME AWARE)
-                        if ((status === 'scheduled' || status === 'open') && o.scheduled_at) {
+                        // A fila de próximos: status 'scheduled', agendamento de hoje, horário maior que agora.
+                        if (status === 'scheduled' && o.scheduled_at) {
                             const schedTime = new Date(o.scheduled_at).getTime();
-                            if (schedTime >= nowMs) {
+                            if (schedTime > nowMs) {
                                 const d2 = new Date(o.scheduled_at);
                                 const bName = o.profiles?.name || 'Sem Nome';
                                 const initials = bName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
