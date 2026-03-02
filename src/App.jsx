@@ -9,6 +9,7 @@ import Clientes from './pages/Clientes';
 import Relatorios from './pages/Relatorios';
 import Estoque from './pages/Estoque';
 import Configuracoes from './pages/Configuracoes';
+import AgendamentoPublico from './pages/AgendamentoPublico';
 
 function App() {
     return (
@@ -23,6 +24,7 @@ function App() {
                     <Route path="/estoque" element={<Estoque />} />
                     <Route path="/relatorios" element={<Relatorios />} />
                     <Route path="/configuracoes" element={<Configuracoes />} />
+                    <Route path="/agendar" element={<AgendamentoPublico />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
             </BrowserRouter>
