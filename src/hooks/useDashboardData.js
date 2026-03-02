@@ -80,7 +80,7 @@ export default function useDashboardData() {
                 // Busca TODOS os agendamentos agendados para este mês + ou abertos independentemente (vamos focar no mês de agendamento por ora)
                 const { data: rawOrdersData } = await supabase
                     .from('orders')
-                    .select('*, profiles!professional_id(name), clients!client_id(name, phone)')
+                    .select('*, professionals(name), clients(name, phone)')
                     .eq('barbershop_id', bId)
                     .gte('scheduled_at', startOfMonthISO)
                     .lte('scheduled_at', endOfMonthISO);
@@ -139,7 +139,7 @@ export default function useDashboardData() {
                         detalheFaturamentoHoje.push({
                             hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
                             cliente: o.clients?.name || 'Cliente Avulso',
-                            barbeiro: o.profiles?.name || 'Sem Barbeiro',
+                            barbeiro: o.professionals?.name || 'Sem Barbeiro',
                             valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
                         });
                     }
@@ -156,7 +156,7 @@ export default function useDashboardData() {
                             _id: o.id,
                             hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
                             cliente: o.clients?.name || 'Cliente Avulso',
-                            barbeiro: o.profiles?.name || 'Sem Barbeiro',
+                            barbeiro: o.professionals?.name || 'Sem Barbeiro',
                             valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
                             created_at: o.created_at
                         });
@@ -200,7 +200,7 @@ export default function useDashboardData() {
                         detalheConversaoMes.push({
                             data: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
                             cliente: o.clients?.name || 'Cliente Avulso',
-                            barbeiro: o.profiles?.name || 'Sem Barbeiro',
+                            barbeiro: o.professionals?.name || 'Sem Barbeiro',
                             status: statusLabels[status] || status,
                             valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
                             created_at: o.created_at
@@ -218,7 +218,7 @@ export default function useDashboardData() {
                             const schedTime = new Date(o.scheduled_at).getTime();
                             if (schedTime > nowMs) {
                                 const d2 = new Date(o.scheduled_at);
-                                const bName = o.profiles?.name || 'Sem Nome';
+                                const bName = o.professionals?.name || 'Sem Nome';
                                 const initials = bName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
                                 proximosAtendimentos.push({
                                     _id: o.id,
