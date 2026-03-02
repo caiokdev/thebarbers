@@ -4,6 +4,8 @@ import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import Drawer, { DrawerTable } from '../components/Drawer';
 import useDashboardData from '../hooks/useDashboardData';
+import { supabase } from '../supabaseClient';
+import OrderDetailsModal from '../components/OrderDetailsModal';
 
 /* ───────── helpers ───────── */
 function formatBRL(v) {
@@ -156,6 +158,43 @@ export default function Dashboard() {
     const [drawerType, setDrawerType] = useState(null);
     const [isChartModalOpen, setIsChartModalOpen] = useState(false);
     const [detailModal, setDetailModal] = useState({ open: false, title: '', items: [] });
+    const [selectedOrder, setSelectedOrder] = useState(null);
+
+    const handleCancelOrder = async (order) => {
+        try {
+            await supabase.from('orders').update({ status: 'canceled' }).eq('id', order.id);
+            alert('Agendamento cancelado com sucesso!');
+            setSelectedOrder(null);
+            window.dispatchEvent(new Event('focus'));
+        } catch (e) { alert('Erro ao cancelar agendamento.'); }
+    };
+
+    const handleNoShowOrder = async (order) => {
+        try {
+            await supabase.from('orders').update({ status: 'no_show' }).eq('id', order.id);
+            alert('Cliente marcado como falta!');
+            setSelectedOrder(null);
+            window.dispatchEvent(new Event('focus'));
+        } catch (e) { alert('Erro ao registrar falta.'); }
+    };
+
+    const handleOpenComanda = async (order) => {
+        try {
+            await supabase.from('orders').update({ status: 'open' }).eq('id', order.id);
+            alert('Comanda aberta com sucesso!');
+            setSelectedOrder(null);
+            window.dispatchEvent(new Event('focus'));
+        } catch (e) { alert('Erro ao abrir comanda.'); }
+    };
+
+    const handleDeleteOrder = async (order) => {
+        try {
+            await supabase.from('orders').delete().eq('id', order.id);
+            alert('Agendamento excluído da base!');
+            setSelectedOrder(null);
+            window.dispatchEvent(new Event('focus'));
+        } catch (e) { alert('Erro ao excluir agendamento.'); }
+    };
 
     function openDrawer(type) {
         setDrawerType(type);
@@ -337,9 +376,13 @@ export default function Dashboard() {
                                 {(data.proximosAtendimentos || []).length === 0 ? (
                                     <p className="text-sm text-slate-500">Nenhum agendamento próximo.</p>
                                 ) : (
-                                    <div className="flex flex-col gap-2">
+                                    <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                                         {data.proximosAtendimentos.map((pro, i) => (
-                                            <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700 transition-colors">
+                                            <div
+                                                key={i}
+                                                onClick={() => setSelectedOrder(pro.orderInfo)}
+                                                className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700 cursor-pointer transition-colors"
+                                            >
                                                 <div className="flex items-center gap-3 min-w-0">
                                                     <div className="w-9 h-9 bg-emerald-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                                                         {pro.initials}
@@ -539,6 +582,18 @@ export default function Dashboard() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ─── MODAL DETALHES AGENDAMENTO ─── */}
+            {selectedOrder && (
+                <OrderDetailsModal
+                    order={selectedOrder}
+                    onClose={() => setSelectedOrder(null)}
+                    onDelete={handleDeleteOrder}
+                    onCancel={handleCancelOrder}
+                    onNoShow={handleNoShowOrder}
+                    onOpenComanda={handleOpenComanda}
+                />
             )}
         </div>
     );
