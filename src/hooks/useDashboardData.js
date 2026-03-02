@@ -77,13 +77,22 @@ export default function useDashboardData() {
                 const in30DaysISO = localDate(in30Days);
 
                 // --- REFATORAÇÃO: O CÉREBRO DO DASHBOARD ---
-                // Busca TODOS os agendamentos agendados para este mês + ou abertos independentemente (vamos focar no mês de agendamento por ora)
+                // Busca TODOS os agendamentos agendados para este mês
                 const { data: rawOrdersData } = await supabase
                     .from('orders')
                     .select('*, professionals(name), clients(name, phone)')
                     .eq('barbershop_id', bId)
                     .gte('scheduled_at', startOfMonthISO)
                     .lte('scheduled_at', endOfMonthISO);
+
+                // Busca TODOS os agendamentos FECHADOS hoje (para faturamento bater com Financeiro)
+                const { data: fechadosHojeData } = await supabase
+                    .from('orders')
+                    .select('id, total_amount, closed_at, professionals(name), clients(name)')
+                    .eq('barbershop_id', bId)
+                    .eq('status', 'closed')
+                    .gte('closed_at', startOfDayISO)
+                    .lte('closed_at', endOfDayISO);
 
                 const allOrdersRaw = rawOrdersData || [];
 
@@ -130,18 +139,9 @@ export default function useDashboardData() {
 
                     const isCreatedThisMonth = o.created_at && o.created_at >= startOfMonthISO && o.created_at <= endOfMonthISO;
 
-                    // 1. Faturamento Dia e Atendimentos Hoje
+                    // 1. Atendimentos Hoje (Progresso)
                     if (isClosedToday) {
-                        faturamentoDia += amount;
                         atendimentosHojeClosed++;
-
-                        const d = new Date(o.closed_at);
-                        detalheFaturamentoHoje.push({
-                            hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
-                            cliente: o.clients?.name || 'Cliente Avulso',
-                            barbeiro: o.professionals?.name || 'Sem Barbeiro',
-                            valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
-                        });
                     }
 
                     if (isScheduledToday && ['scheduled', 'confirmed', 'open', 'closed'].includes(status)) {
@@ -232,6 +232,19 @@ export default function useDashboardData() {
                             }
                         }
                     }
+                });
+
+                // Atualizar Faturamento Real de Hoje
+                (fechadosHojeData || []).forEach(o => {
+                    const amount = parseFloat(o.total_amount || 0);
+                    faturamentoDia += amount;
+                    const d = new Date(o.closed_at);
+                    detalheFaturamentoHoje.push({
+                        hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+                        cliente: o.clients?.name || 'Cliente Avulso',
+                        barbeiro: o.professionals?.name || 'Sem Barbeiro',
+                        valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
+                    });
                 });
 
                 // Ordenações
