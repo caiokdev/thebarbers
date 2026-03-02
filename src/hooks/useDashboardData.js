@@ -749,7 +749,7 @@ export default function useDashboardData() {
                 // --- 🔥 FUNIL DE AGENDAMENTOS (mês atual — por scheduled_at) ---
                 const { data: allFunnelOrders } = await supabase
                     .from('orders')
-                    .select('status, client_id, professional_id, scheduled_at')
+                    .select('status, client_id, professional_id, scheduled_at, profiles!professional_id(name)')
                     .eq('barbershop_id', bId)
                     .gte('scheduled_at', startOfMonthISO)
                     .lte('scheduled_at', endOfMonthISO);
@@ -782,7 +782,7 @@ export default function useDashboardData() {
                     const d = o.scheduled_at ? new Date(o.scheduled_at) : null;
                     return {
                         cliente: detailClientMap[o.client_id] || 'Cliente Avulso',
-                        profissional: detailProMap[o.professional_id] || 'Sem nome',
+                        profissional: (o.profiles && o.profiles.name) ? o.profiles.name : (detailProMap[o.professional_id] || 'Sem nome'),
                         horario: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—',
                         data: d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` : '—',
                     };
