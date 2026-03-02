@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+import { useTheme } from '../context/ThemeContext';
 import Sidebar from '../components/Sidebar';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -129,6 +130,7 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
 }
 
 export default function Relatorios() {
+    const { theme } = useTheme();
     const now = new Date();
     const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -367,7 +369,7 @@ export default function Relatorios() {
                 const proIds = [...new Set(currentMonthOrders.map(o => o.professional_id).filter(Boolean))];
                 let proMap = {};
                 if (proIds.length > 0) {
-                    const { data: pros } = await supabase.from('profiles').select('id, name').in('id', proIds);
+                    const { data: pros } = await supabase.from('professionals').select('id, name').in('id', proIds);
                     (pros || []).forEach(p => { proMap[p.id] = p.name; });
                 }
 
@@ -501,7 +503,7 @@ export default function Relatorios() {
                             type="month"
                             value={selectedPeriod}
                             onChange={e => setSelectedPeriod(e.target.value)}
-                            className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer"
+                            className={`bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none ${theme.focusBorder} transition-colors cursor-pointer`}
                         />
                         <button
                             onClick={handlePrint}
@@ -523,7 +525,7 @@ export default function Relatorios() {
                                 key={tab.key}
                                 onClick={() => setActiveTab(tab.key)}
                                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg border-b-2 transition-all duration-200 ${activeTab === tab.key
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500'
+                                    ? `${theme.bgLight} ${theme.text} ${theme.border}`
                                     : 'text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/50'
                                     }`}
                             >
@@ -541,7 +543,7 @@ export default function Relatorios() {
                     {loading ? (
                         <div className="flex items-center justify-center py-32">
                             <div className="text-center">
-                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-3" />
+                                <div className={`inline-block w-10 h-10 border-4 border-slate-700 ${theme.borderTop} rounded-full animate-spin mb-3`} />
                                 <p className="text-sm text-slate-500">Carregando relatórios...</p>
                             </div>
                         </div>
@@ -555,11 +557,11 @@ export default function Relatorios() {
                                     onClick={() => setDetailsModal({ open: true, type: 'orders', title: `Faturamento — ${periodLabel}`, data: ordersDoMes })}
                                 >
                                     <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Faturamento — {periodLabel}</p>
-                                    <p className="text-2xl font-bold text-emerald-400 mt-1">{formatBRL(kpis.faturamentoMes)}</p>
+                                    <p className={`text-2xl font-bold ${theme.text} mt-1`}>{formatBRL(kpis.faturamentoMes)}</p>
                                     {kpis.crescimentoMM !== null && (
                                         <div className="flex items-center gap-1.5 mt-2">
                                             {kpis.crescimentoMM >= 0 ? (
-                                                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                <svg className={`w-4 h-4 ${theme.text}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
                                                 </svg>
                                             ) : (
@@ -567,7 +569,7 @@ export default function Relatorios() {
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 4.5l15 15m0 0V8.25m0 11.25H8.25" />
                                                 </svg>
                                             )}
-                                            <span className={`text-xs font-semibold ${kpis.crescimentoMM >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            <span className={`text-xs font-semibold ${kpis.crescimentoMM >= 0 ? theme.text : 'text-rose-400'}`}>
                                                 {kpis.crescimentoMM >= 0 ? '+' : ''}{kpis.crescimentoMM.toFixed(1)}% vs mês anterior
                                             </span>
                                         </div>
@@ -836,7 +838,7 @@ export default function Relatorios() {
                                                                 <span className="text-sm text-slate-300 font-medium">{b.nome}</span>
                                                                 <div className="flex items-center gap-3">
                                                                     <span className="text-[11px] text-slate-500">{b.qtd} atend.</span>
-                                                                    <span className="text-sm font-bold text-emerald-400">{formatBRL(b.total)}</span>
+                                                                    <span className={`text-sm font-bold ${theme.text}`}>{formatBRL(b.total)}</span>
                                                                 </div>
                                                             </div>
                                                             <div className="w-full bg-slate-900 rounded-full h-2.5">
