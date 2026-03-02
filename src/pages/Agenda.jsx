@@ -53,6 +53,7 @@ const STATUS_CONFIG = {
     open: { label: 'Aberto', bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/30' },
     completed: { label: 'Concluído', bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
     cancelled: { label: 'Cancelado', bg: 'bg-rose-500/15', text: 'text-rose-400', border: 'border-rose-500/30' },
+    no_show: { label: 'Não Compareceu', bg: 'bg-slate-500/15', text: 'text-slate-400', border: 'border-slate-500/30' },
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -197,7 +198,7 @@ export default function Agenda() {
             .eq('barbershop_id', barbershopId)
             .gte('scheduled_at', startOfDay)
             .lte('scheduled_at', endOfDay)
-            .in('status', ['scheduled', 'confirmed', 'open']);
+            .in('status', ['scheduled', 'confirmed', 'open', 'no_show']);
 
         setAppointments(data || []);
     }, [barbershopId, selectedDate]);
@@ -373,9 +374,17 @@ export default function Agenda() {
                                                         title={appt ? `${clientMap[appt.client_id] || 'Cliente'} — ${formatCurrency(appt.total_amount)}` : `${time} — ${pro.name}`}
                                                     >
                                                         {appt ? (
-                                                            <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center cursor-pointer hover:ring-2 ring-emerald-400 transition-all ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30`}>
-                                                                <p className="text-xs font-semibold text-slate-100 truncate">{clientMap[appt.client_id] || 'Cliente'}</p>
-                                                                <p className="text-[10px] text-slate-400 truncate">{formatCurrency(appt.total_amount)}</p>
+                                                            <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center cursor-pointer hover:ring-2 transition-all ${appt.status === 'no_show'
+                                                                    ? 'bg-slate-700/40 border border-slate-600/40 ring-slate-400 opacity-60'
+                                                                    : `${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30 ring-emerald-400`
+                                                                }`}>
+                                                                <p className={`text-xs font-semibold truncate ${appt.status === 'no_show' ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{clientMap[appt.client_id] || 'Cliente'}</p>
+                                                                <div className="flex items-center gap-1">
+                                                                    <p className={`text-[10px] truncate ${appt.status === 'no_show' ? 'text-slate-600 line-through' : 'text-slate-400'}`}>{formatCurrency(appt.total_amount)}</p>
+                                                                    {appt.status === 'no_show' && (
+                                                                        <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         ) : (
                                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -438,6 +447,17 @@ export default function Agenda() {
                         setSelectedOrderDetails(null);
                         fetchAppointments();
                         alert('Agendamento cancelado com sucesso.');
+                    }}
+                    onNoShow={async () => {
+                        const { error } = await supabase
+                            .from('orders')
+                            .update({ status: 'no_show' })
+                            .eq('id', selectedOrderDetails.id);
+                        if (error) { alert(`Erro ao marcar falta: ${error.message}`); return; }
+                        setIsDetailsModalOpen(false);
+                        setSelectedOrderDetails(null);
+                        fetchAppointments();
+                        alert('Cliente marcado como Não Compareceu.');
                     }}
                     onOpenComanda={async () => {
                         const { error } = await supabase
@@ -834,7 +854,7 @@ function AppointmentModal({
 /* ═══════════════════════════════════════════════════════════════
    ORDER DETAILS MODAL — View appointment details
    ═══════════════════════════════════════════════════════════════ */
-function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onOpenComanda }) {
+function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onNoShow, onOpenComanda }) {
     const [actionLoading, setActionLoading] = useState(false);
     const dt = new Date(order.scheduled_at);
     const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
@@ -848,6 +868,13 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onOpen
         if (!confirm('Tem certeza que deseja cancelar este agendamento?')) return;
         setActionLoading(true);
         await onCancel();
+        setActionLoading(false);
+    };
+
+    const handleNoShow = async () => {
+        if (!confirm('Marcar este cliente como "Não Compareceu"?')) return;
+        setActionLoading(true);
+        await onNoShow();
         setActionLoading(false);
     };
 
@@ -911,42 +938,60 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onOpen
                 </div>
 
                 {/* Actions */}
-                {['canceled', 'closed'].includes(order.status) ? (
+                {['canceled', 'closed', 'no_show'].includes(order.status) ? (
                     <div className="pt-4 border-t border-slate-700">
-                        <p className="text-center text-sm text-slate-500 italic">Nenhuma ação disponível para este status.</p>
+                        <p className="text-center text-sm text-slate-500 italic">
+                            {order.status === 'no_show' ? '⚠️ Cliente não compareceu a este agendamento.' : 'Nenhuma ação disponível para este status.'}
+                        </p>
                     </div>
                 ) : (
-                    <div className="flex items-center gap-3 pt-4 border-t border-slate-700">
-                        <button
-                            onClick={handleCancel}
-                            disabled={actionLoading || order.status === 'open'}
-                            className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border ${order.status === 'open'
-                                ? 'text-slate-500 bg-slate-800 border-slate-700 cursor-not-allowed opacity-50'
-                                : 'text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50'
-                                }`}
-                        >
-                            {actionLoading ? <div className="w-4 h-4 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin" /> : (
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                            )}
-                            Cancelar Agendamento
-                        </button>
-                        <button
-                            onClick={order.status !== 'open' ? handleOpenComanda : undefined}
-                            disabled={actionLoading || order.status === 'open'}
-                            className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${order.status === 'open'
-                                ? 'text-amber-300 bg-amber-500/10 border border-amber-500/20 cursor-not-allowed opacity-70'
-                                : 'text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 disabled:opacity-50'
-                                }`}
-                        >
-                            {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
-                                order.status === 'open' ? (
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                ) : (
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                                )
-                            )}
-                            {order.status === 'open' ? 'Comanda em Andamento' : 'Abrir Comanda / Checkout'}
-                        </button>
+                    <div className="space-y-3 pt-4 border-t border-slate-700">
+                        {/* Main actions row */}
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={handleCancel}
+                                disabled={actionLoading || order.status === 'open'}
+                                className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border ${order.status === 'open'
+                                    ? 'text-slate-500 bg-slate-800 border-slate-700 cursor-not-allowed opacity-50'
+                                    : 'text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50'
+                                    }`}
+                            >
+                                {actionLoading ? <div className="w-4 h-4 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin" /> : (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                )}
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={order.status !== 'open' ? handleOpenComanda : undefined}
+                                disabled={actionLoading || order.status === 'open'}
+                                className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${order.status === 'open'
+                                    ? 'text-amber-300 bg-amber-500/10 border border-amber-500/20 cursor-not-allowed opacity-70'
+                                    : 'text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 disabled:opacity-50'
+                                    }`}
+                            >
+                                {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
+                                    order.status === 'open' ? (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                    )
+                                )}
+                                {order.status === 'open' ? 'Comanda Aberta' : 'Abrir Comanda'}
+                            </button>
+                        </div>
+                        {/* No-show button */}
+                        {order.status !== 'open' && (
+                            <button
+                                onClick={handleNoShow}
+                                disabled={actionLoading}
+                                className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border text-slate-400 bg-slate-800 border-slate-600 hover:bg-slate-700 hover:text-slate-200 disabled:opacity-50"
+                            >
+                                {actionLoading ? <div className="w-4 h-4 border-2 border-slate-400/30 border-t-slate-400 rounded-full animate-spin" /> : (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                )}
+                                Marcar como Falta / Não Compareceu
+                            </button>
+                        )}
                     </div>
                 )}
             </div>
