@@ -67,7 +67,7 @@ export default function Automacoes() {
         const isConfigOpen = openConfig === key;
 
         return (
-            <div className={`bg-slate-900 border ${isConfigOpen ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-slate-800'} rounded-2xl flex flex-col relative overflow-hidden group mb-6 transition-all duration-300`}>
+            <div className={`bg-slate-900 border ${isConfigOpen ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-slate-800'} rounded-2xl flex flex-col relative group mb-6 transition-all duration-300`}>
                 <div className={`absolute top-0 right-0 w-32 h-32 ${theme.bg} opacity-5 blur-3xl rounded-full translate-x-10 -translate-y-10 transition-opacity duration-300 ${isActive ? 'opacity-20' : 'opacity-0'}`} />
 
                 <div className="p-6 relative z-10 lg:h-52 flex flex-col justify-between">
@@ -108,7 +108,7 @@ export default function Automacoes() {
                 </div>
 
                 {isConfigOpen && (
-                    <div className="border-t border-slate-800 bg-slate-900/80 p-6 relative z-10 transition-all duration-300">
+                    <div className="border-t border-slate-800 bg-slate-900/80 p-6 relative rounded-b-2xl z-10 transition-all duration-300">
                         <label className="text-sm font-semibold text-slate-300 block mb-1">Mensagem do WhatsApp</label>
                         <p className="text-xs text-slate-500 mb-4">Clique nas variáveis abaixo para inserir dinamicamente na mensagem.</p>
 
