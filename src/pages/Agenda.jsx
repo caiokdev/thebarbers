@@ -586,8 +586,13 @@ function AppointmentModal({
 
     // ── SAVE to Supabase ──
     const handleSave = async () => {
-        if (!professionalId || !date || !time || !clientId) {
-            alert('Preencha todos os campos obrigatórios (Profissional, Data, Horário e Cliente).');
+        if (!professionalId || !date || !time) {
+            alert('Preencha os campos obrigatórios (Profissional, Data e Horário).');
+            return;
+        }
+
+        if (!isAvulso && !clientId) {
+            alert('Selecione um cliente válido (pesquise e clique na lista) ou marque como Serviço Avulso.');
             return;
         }
 
@@ -627,7 +632,7 @@ function AppointmentModal({
                 .insert({
                     barbershop_id: barbershopId,
                     professional_id: professionalId,
-                    client_id: clientId,
+                    client_id: clientId || null,
                     scheduled_at: scheduledAt,
                     total_amount: totalAmount,
                     status: 'scheduled',
@@ -637,7 +642,12 @@ function AppointmentModal({
                 .select('id')
                 .single();
 
-            if (orderError) throw orderError;
+            if (orderError) {
+                console.error('Erro no Supabase:', orderError);
+                alert('Erro ao salvar no banco: ' + orderError.message);
+                setSaving(false);
+                return;
+            }
 
             // Insert order_items (skip if avulso)
             if (!isAvulso && cartItems.length > 0 && order?.id) {

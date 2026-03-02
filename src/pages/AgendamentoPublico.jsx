@@ -256,7 +256,7 @@ export default function AgendamentoPublico() {
                 .insert({
                     barbershop_id: barbershopId,
                     professional_id: professionalId,
-                    client_id: clientId,
+                    client_id: clientId || null,
                     scheduled_at: scheduledAt,
                     total_amount: totalAmount,
                     status: 'scheduled',
@@ -265,7 +265,12 @@ export default function AgendamentoPublico() {
                 .select('id')
                 .single();
 
-            if (orderError) throw orderError;
+            if (orderError) {
+                console.error('Erro no Supabase:', orderError);
+                alert('Erro ao salvar no banco: ' + orderError.message);
+                setSaving(false);
+                return;
+            }
 
             // 5) Insert order_items
             if (selectedServices.length > 0 && order?.id) {
