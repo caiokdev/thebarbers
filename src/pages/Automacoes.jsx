@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
+import { supabase } from '../supabaseClient';
 
 const DEFAULT_MESSAGES = {
     reminder: "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo! Falta cerca de 1 hora.",
@@ -22,21 +23,68 @@ export default function Automacoes() {
     const [openConfig, setOpenConfig] = useState(null); // 'reminder', 'feedback', 'noshow'
     const textRef = useRef(null);
 
+    const [barbershopId, setBarbershopId] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
     useEffect(() => {
-        const saved = localStorage.getItem('@thebarbers/automation_messages');
-        if (saved) {
-            setMessages(JSON.parse(saved));
+        async function fetchSettings() {
+            setLoading(true);
+            try {
+                const { data: shop, error } = await supabase
+                    .from('barbershops')
+                    .select('id, reminder_active, reminder_msg, feedback_active, feedback_msg, noshow_active, noshow_msg')
+                    .limit(1)
+                    .single();
+
+                if (error) throw error;
+                if (shop) {
+                    setBarbershopId(shop.id);
+                    setToggles({
+                        reminder: shop.reminder_active ?? true,
+                        feedback: shop.feedback_active ?? false,
+                        noshow: shop.noshow_active ?? true,
+                    });
+                    setMessages({
+                        reminder: shop.reminder_msg ?? DEFAULT_MESSAGES.reminder,
+                        feedback: shop.feedback_msg ?? DEFAULT_MESSAGES.feedback,
+                        noshow: shop.noshow_msg ?? DEFAULT_MESSAGES.noshow,
+                    });
+                }
+            } catch (error) {
+                console.error('Erro ao buscar automações:', error);
+            } finally {
+                setLoading(false);
+            }
         }
-        const savedToggles = localStorage.getItem('@thebarbers/automation_toggles');
-        if (savedToggles) {
-            setToggles(JSON.parse(savedToggles));
-        }
+
+        fetchSettings();
     }, []);
 
-    const handleSave = () => {
-        localStorage.setItem('@thebarbers/automation_messages', JSON.stringify(messages));
-        localStorage.setItem('@thebarbers/automation_toggles', JSON.stringify(toggles));
-        alert('Configurações salvas localmente!');
+    const handleSave = async () => {
+        if (!barbershopId) return;
+        setSaving(true);
+        try {
+            const { error } = await supabase
+                .from('barbershops')
+                .update({
+                    reminder_active: toggles.reminder,
+                    reminder_msg: messages.reminder,
+                    feedback_active: toggles.feedback,
+                    feedback_msg: messages.feedback,
+                    noshow_active: toggles.noshow,
+                    noshow_msg: messages.noshow
+                })
+                .eq('id', barbershopId);
+
+            if (error) throw error;
+            alert('Automações salvas com sucesso!');
+        } catch (error) {
+            console.error('Erro ao salvar automações:', error);
+            alert('Erro ao salvar automações. Tente novamente.');
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleToggle = (key) => {
@@ -133,6 +181,20 @@ export default function Automacoes() {
         );
     };
 
+    if (loading) {
+        return (
+            <div className="flex h-screen bg-slate-950 overflow-hidden font-sans">
+                <Sidebar />
+                <main className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4" />
+                        <p className="text-slate-500 text-sm">Carregando automações...</p>
+                    </div>
+                </main>
+            </div>
+        );
+    }
+
     return (
         <div className="flex h-screen bg-slate-950 overflow-hidden font-sans">
             <Sidebar />
@@ -148,12 +210,17 @@ export default function Automacoes() {
                             </div>
                             <button
                                 onClick={handleSave}
-                                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg ${theme.bg} text-white hover:brightness-110 flex items-center gap-2`}
+                                disabled={saving}
+                                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg ${theme.bg} text-white hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2`}
                             >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                                Salvar Tudo
+                                {saving ? (
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                )}
+                                {saving ? 'Salvando...' : 'Salvar Tudo'}
                             </button>
                         </div>
 
