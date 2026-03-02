@@ -235,7 +235,12 @@ export default function Agenda() {
     // ── Appointment placement helpers ──
     const appointmentsBySlot = useMemo(() => {
         const map = {};
-        (appointments || []).forEach(a => {
+        // Sort so that no_show comes first. Thus, valid appointments will visually overwrite no_show if in the same slot.
+        [...(appointments || [])].sort((a, b) => {
+            if (a.status === 'no_show' && b.status !== 'no_show') return -1;
+            if (a.status !== 'no_show' && b.status === 'no_show') return 1;
+            return 0;
+        }).forEach(a => {
             if (!a.scheduled_at || !a.professional_id) return;
             const dt = new Date(a.scheduled_at);
             const hh = String(dt.getHours()).padStart(2, '0');
@@ -375,8 +380,8 @@ export default function Agenda() {
                                                     >
                                                         {appt ? (
                                                             <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center cursor-pointer hover:ring-2 transition-all ${appt.status === 'no_show'
-                                                                    ? 'bg-slate-700/40 border border-slate-600/40 ring-slate-400 opacity-60'
-                                                                    : `${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30 ring-emerald-400`
+                                                                ? 'bg-slate-700/40 border border-slate-600/40 ring-slate-400 opacity-60'
+                                                                : `${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30 ring-emerald-400`
                                                                 }`}>
                                                                 <p className={`text-xs font-semibold truncate ${appt.status === 'no_show' ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{clientMap[appt.client_id] || 'Cliente'}</p>
                                                                 <div className="flex items-center gap-1">
@@ -437,6 +442,17 @@ export default function Agenda() {
                     clientMap={clientMap}
                     proMap={proMap}
                     onClose={() => { setIsDetailsModalOpen(false); setSelectedOrderDetails(null); }}
+                    onDelete={async () => {
+                        const { error } = await supabase
+                            .from('orders')
+                            .delete()
+                            .eq('id', selectedOrderDetails.id);
+                        if (error) { alert(`Erro ao excluir: ${error.message}`); return; }
+                        setIsDetailsModalOpen(false);
+                        setSelectedOrderDetails(null);
+                        fetchAppointments();
+                        alert('Agendamento excluído com sucesso.');
+                    }}
                     onCancel={async () => {
                         const { error } = await supabase
                             .from('orders')
@@ -586,6 +602,7 @@ function AppointmentModal({
         // ── Double-booking check (against loaded appointments) ──
         const conflict = (appointments || []).find(a => {
             if (a.professional_id !== professionalId) return false;
+            if (a.status === 'no_show' || a.status === 'canceled') return false; // freeing the slot mathematically
             const existing = new Date(a.scheduled_at);
             return existing.getFullYear() === localDate.getFullYear()
                 && existing.getMonth() === localDate.getMonth()
@@ -854,7 +871,7 @@ function AppointmentModal({
 /* ═══════════════════════════════════════════════════════════════
    ORDER DETAILS MODAL — View appointment details
    ═══════════════════════════════════════════════════════════════ */
-function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onNoShow, onOpenComanda }) {
+function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCancel, onNoShow, onOpenComanda }) {
     const [actionLoading, setActionLoading] = useState(false);
     const dt = new Date(order.scheduled_at);
     const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
@@ -875,6 +892,13 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onNoSh
         if (!confirm('Marcar este cliente como "Não Compareceu"?')) return;
         setActionLoading(true);
         await onNoShow();
+        setActionLoading(false);
+    };
+
+    const handleDelete = async () => {
+        if (!confirm('Tem certeza que deseja EXCLUIR este agendamento? Esta ação não pode ser desfeita.')) return;
+        setActionLoading(true);
+        await onDelete();
         setActionLoading(false);
     };
 
@@ -992,6 +1016,16 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onCancel, onNoSh
                                 Marcar como Falta / Não Compareceu
                             </button>
                         )}
+                        <button
+                            onClick={handleDelete}
+                            disabled={actionLoading}
+                            className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors text-white bg-rose-500 hover:bg-rose-600 shadow-lg shadow-rose-500/20 disabled:opacity-50"
+                        >
+                            {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            )}
+                            Excluir Agendamento
+                        </button>
                     </div>
                 )}
             </div>

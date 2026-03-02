@@ -118,6 +118,7 @@ export default function useDashboardData() {
                         .from('orders')
                         .select('*', { count: 'exact', head: true })
                         .eq('barbershop_id', bId)
+                        .in('status', ['scheduled', 'confirmed', 'open', 'closed'])
                         .gte('scheduled_at', startOfDayISO)
                         .lte('scheduled_at', endOfDayISO),
                 ]);
@@ -758,7 +759,7 @@ export default function useDashboardData() {
                 const noShowOrders = [], canceledOrders = [];
                 (allFunnelOrders || []).forEach(o => {
                     if (o.status === 'closed') funnelClosed++;
-                    else if (o.status === 'no-show') { funnelNoShow++; noShowOrders.push(o); }
+                    else if (o.status === 'no_show' || o.status === 'no-show') { funnelNoShow++; noShowOrders.push(o); }
                     else if (o.status === 'canceled') { funnelCanceled++; canceledOrders.push(o); }
                     else if (o.status === 'scheduled') funnelScheduled++;
                     else if (o.status === 'open') funnelOpen++;
