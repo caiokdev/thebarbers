@@ -235,10 +235,13 @@ export default function Agenda() {
     // ── Appointment placement helpers ──
     const appointmentsBySlot = useMemo(() => {
         const map = {};
-        // Sort so that no_show comes first. Thus, valid appointments will visually overwrite no_show if in the same slot.
+        // Sort chronologically. If same time, no_show goes to bottom.
         [...(appointments || [])].sort((a, b) => {
-            if (a.status === 'no_show' && b.status !== 'no_show') return -1;
-            if (a.status !== 'no_show' && b.status === 'no_show') return 1;
+            const timeA = new Date(a.scheduled_at).getTime();
+            const timeB = new Date(b.scheduled_at).getTime();
+            if (timeA !== timeB) return timeA - timeB;
+            if (a.status === 'no_show' && b.status !== 'no_show') return 1;
+            if (a.status !== 'no_show' && b.status === 'no_show') return -1;
             return 0;
         }).forEach(a => {
             if (!a.scheduled_at || !a.professional_id) return;
@@ -246,7 +249,8 @@ export default function Agenda() {
             const hh = String(dt.getHours()).padStart(2, '0');
             const mm = dt.getMinutes() < 30 ? '00' : '30';
             const key = `${hh}:${mm}-${a.professional_id}`;
-            map[key] = a;
+            if (!map[key]) map[key] = [];
+            map[key].push(a);
         });
         return map;
     }, [appointments]);
@@ -368,29 +372,35 @@ export default function Agenda() {
 
                                             {professionals.map((pro, colIdx) => {
                                                 const slotKey = `${time}-${pro.id}`;
-                                                const appt = appointmentsBySlot[slotKey];
+                                                const appts = appointmentsBySlot[slotKey] || [];
 
                                                 return (
                                                     <div
                                                         key={slotKey}
-                                                        onClick={() => appt ? openDetailsModal(appt) : openModalFromCell(pro.id, time)}
-                                                        className={`h-14 border-r border-slate-700/30 relative transition-all duration-150 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'
-                                                            } ${appt ? 'cursor-pointer' : 'cursor-pointer group hover:bg-emerald-500/5 hover:border-emerald-500/20'}`}
-                                                        title={appt ? `${clientMap[appt.client_id] || 'Cliente'} — ${formatCurrency(appt.total_amount)}` : `${time} — ${pro.name}`}
+                                                        onClick={(e) => {
+                                                            appts.length === 0 && openModalFromCell(pro.id, time);
+                                                        }}
+                                                        className={`min-h-[56px] border-r border-slate-700/30 relative transition-all duration-150 p-0.5 flex flex-col gap-1 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'} ${appts.length === 0 ? 'cursor-pointer group hover:bg-emerald-500/5 hover:border-emerald-500/20' : ''}`}
                                                     >
-                                                        {appt ? (
-                                                            <div className={`absolute inset-0.5 rounded-lg px-2 py-1 flex flex-col justify-center cursor-pointer hover:ring-2 transition-all ${appt.status === 'no_show'
-                                                                ? 'bg-slate-700/40 border border-slate-600/40 ring-slate-400 opacity-60'
-                                                                : `${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30 ring-emerald-400`
-                                                                }`}>
-                                                                <p className={`text-xs font-semibold truncate ${appt.status === 'no_show' ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{clientMap[appt.client_id] || 'Cliente'}</p>
-                                                                <div className="flex items-center gap-1">
-                                                                    <p className={`text-[10px] truncate ${appt.status === 'no_show' ? 'text-slate-600 line-through' : 'text-slate-400'}`}>{formatCurrency(appt.total_amount)}</p>
-                                                                    {appt.status === 'no_show' && (
-                                                                        <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>
-                                                                    )}
+                                                        {appts.length > 0 ? (
+                                                            appts.map((appt, i) => (
+                                                                <div
+                                                                    key={appt.id || i}
+                                                                    onClick={(e) => { e.stopPropagation(); openDetailsModal(appt); }}
+                                                                    title={`${clientMap[appt.client_id] || 'Cliente'} — ${formatCurrency(appt.total_amount)}`}
+                                                                    className={`w-full rounded-lg px-2 py-1 flex flex-col justify-center cursor-pointer hover:ring-2 transition-all min-h-[48px] relative ${appt.status === 'no_show'
+                                                                        ? 'bg-slate-700/40 border border-slate-600/40 ring-slate-400 opacity-60'
+                                                                        : `${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30 ring-emerald-400`
+                                                                        }`}>
+                                                                    <p className={`text-xs font-semibold truncate ${appt.status === 'no_show' ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{clientMap[appt.client_id] || 'Cliente'}</p>
+                                                                    <div className="flex items-center gap-1">
+                                                                        <p className={`text-[10px] truncate ${appt.status === 'no_show' ? 'text-slate-600 line-through' : 'text-slate-400'}`}>{formatCurrency(appt.total_amount)}</p>
+                                                                        {appt.status === 'no_show' && (
+                                                                            <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
-                                                            </div>
+                                                            ))
                                                         ) : (
                                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                                                 <div className="w-6 h-6 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
