@@ -630,11 +630,11 @@ function AppointmentModal({
             const { data: order, error: orderError } = await supabase
                 .from('orders')
                 .insert({
-                    barbershop_id: barbershopId,
-                    professional_id: professionalId,
+                    barbershop_id: barbershopId || null,
+                    professional_id: professionalId || null,
                     client_id: clientId || null,
                     scheduled_at: scheduledAt,
-                    total_amount: totalAmount,
+                    total_amount: parseFloat(totalAmount) || 0,
                     status: 'scheduled',
                     origin: origin,
                     ...(isAvulso && avulsoNotes ? { notes: avulsoNotes } : {}),
