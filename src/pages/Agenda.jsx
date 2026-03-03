@@ -66,6 +66,7 @@ export default function Agenda() {
     const [clients, setClients] = useState([]);
     const [catalog, setCatalog] = useState([]);       // services + products combined
     const [barbershopId, setBarbershopId] = useState(null);
+    const [noshowActive, setNoshowActive] = useState(false);
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -113,12 +114,13 @@ export default function Agenda() {
             try {
                 const { data: shop } = await supabase
                     .from('barbershops')
-                    .select('id')
+                    .select('id, noshow_active')
                     .limit(1)
                     .single();
 
                 if (!shop) { setLoading(false); return; }
                 setBarbershopId(shop.id);
+                setNoshowActive(shop.noshow_active ?? false);
 
                 const [barbersRes, clientsRes, productsRes] = await Promise.all([
                     supabase.from('professionals').select('id, name, specialty')
@@ -480,6 +482,25 @@ export default function Agenda() {
                             .update({ status: 'no_show' })
                             .eq('id', selectedOrderDetails.id);
                         if (error) { alert(`Erro ao marcar falta: ${error.message}`); return; }
+
+                        if (noshowActive) {
+                            try {
+                                await fetch('https://caiokdev.app.n8n.cloud/webhook-test/naocompareceu', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        orderId: selectedOrderDetails.id,
+                                        barbershopId: barbershopId,
+                                        clientId: selectedOrderDetails.client_id,
+                                        professionalId: selectedOrderDetails.professional_id,
+                                        scheduledAt: selectedOrderDetails.scheduled_at,
+                                    })
+                                });
+                            } catch (err) {
+                                console.error('Erro ao acionar webhook n8n (no_show):', err);
+                            }
+                        }
+
                         setIsDetailsModalOpen(false);
                         setSelectedOrderDetails(null);
                         fetchAppointments();
