@@ -114,6 +114,7 @@ export default function useDashboardData() {
                 let funnelOpen = 0;
 
                 const detalheFaturamentoHoje = [];
+                const detalheAtendimentosHoje = [];
                 const detalheComandasAbertas = [];
                 const detalheConversaoMes = [];
                 const dailyMetaMap = {};
@@ -140,10 +141,7 @@ export default function useDashboardData() {
                     const isCreatedThisMonth = o.created_at && o.created_at >= startOfMonthISO && o.created_at <= endOfMonthISO;
 
                     // 1. Atendimentos Hoje (Progresso)
-                    if (isClosedToday) {
-                        atendimentosHojeClosed++;
-                    }
-
+                    // We will rely on fechadosHojeData for the closed count later to be accurate with checkouts.
                     if (isScheduledToday && ['scheduled', 'confirmed', 'open', 'closed'].includes(status)) {
                         atendimentosHojeTotal++;
                     }
@@ -152,13 +150,14 @@ export default function useDashboardData() {
                     if (status === 'open') {
                         openOrdersCount++;
                         const d = o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at);
+                        const cDate = new Date(o.created_at);
                         detalheComandasAbertas.push({
                             _id: o.id,
                             hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
                             cliente: o.clients?.name || 'Cliente Avulso',
                             barbeiro: o.professionals?.name || 'Sem Barbeiro',
                             valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
-                            created_at: o.created_at
+                            created_at: `${String(cDate.getDate()).padStart(2, '0')}/${String(cDate.getMonth() + 1).padStart(2, '0')} ${String(cDate.getHours()).padStart(2, '0')}:${String(cDate.getMinutes()).padStart(2, '0')}` // Data amigável
                         });
                     }
 
@@ -197,8 +196,9 @@ export default function useDashboardData() {
 
                         const d = new Date(o.created_at || o.scheduled_at);
                         const statusLabels = { closed: 'Fechado', open: 'Aberto', scheduled: 'Agendado', 'no_show': 'No-show', canceled: 'Cancelado' };
+                        const cDate = new Date(o.scheduled_at || o.created_at);
                         detalheConversaoMes.push({
-                            data: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+                            data: `${String(cDate.getDate()).padStart(2, '0')}/${String(cDate.getMonth() + 1).padStart(2, '0')} ${String(cDate.getHours()).padStart(2, '0')}:${String(cDate.getMinutes()).padStart(2, '0')}`,
                             cliente: o.clients?.name || 'Cliente Avulso',
                             barbeiro: o.professionals?.name || 'Sem Barbeiro',
                             status: statusLabels[status] || status,
@@ -234,21 +234,25 @@ export default function useDashboardData() {
                     }
                 });
 
-                // Atualizar Faturamento Real de Hoje
+                // Atualizar Faturamento Real de Hoje e Atendimentos Fechados Hoje
                 (fechadosHojeData || []).forEach(o => {
                     const amount = parseFloat(o.total_amount || 0);
                     faturamentoDia += amount;
+                    atendimentosHojeClosed++;
                     const d = new Date(o.closed_at);
-                    detalheFaturamentoHoje.push({
+                    const pushObj = {
                         hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
                         cliente: o.clients?.name || 'Cliente Avulso',
                         barbeiro: o.professionals?.name || 'Sem Barbeiro',
                         valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
-                    });
+                    };
+                    detalheFaturamentoHoje.push(pushObj);
+                    detalheAtendimentosHoje.push(pushObj);
                 });
 
                 // Ordenações
                 detalheFaturamentoHoje.sort((a, b) => a.hora.localeCompare(b.hora));
+                detalheAtendimentosHoje.sort((a, b) => a.hora.localeCompare(b.hora));
                 detalheComandasAbertas.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                 detalheConversaoMes.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                 proximosAtendimentos.sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
@@ -267,9 +271,9 @@ export default function useDashboardData() {
                     const d = o.scheduled_at ? new Date(o.scheduled_at) : null;
                     return {
                         id: o.id,
-                        orderInfo: { ...o, client_name: o.clients?.name, professional_name: o.profiles?.name },
+                        orderInfo: { ...o, client_name: o.clients?.name, professional_name: o.professionals?.name },
                         cliente: o.clients?.name || 'Cliente Avulso',
-                        profissional: o.profiles?.name || 'Sem nome',
+                        profissional: o.professionals?.name || 'Sem nome', // CORRIGIDO: profiles -> professionals
                         horario: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—',
                         data: d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` : '—',
                     };
@@ -578,6 +582,7 @@ export default function useDashboardData() {
                     contratosVencendo,
                     faturamento7Dias,
                     detalheFaturamentoHoje,
+                    detalheAtendimentosHoje,
                     detalheComandasAbertas,
                     detalheConversaoMes,
                     detalheMetaMes,

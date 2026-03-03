@@ -492,11 +492,10 @@ export default function Agenda() {
                                 .single();
 
                             if (shop && shop.noshow_active) {
-                                // Envia POST no-cors para não tomar block de preflight do n8n se o CORS não tiver ativado lá
+                                // Envia POST como JSON para o webhook ser lido corretamente pelo n8n
                                 await fetch('https://caiokdev.app.n8n.cloud/webhook-test/naocompareceu', {
                                     method: 'POST',
-                                    mode: 'no-cors',
-                                    headers: { 'Content-Type': 'text/plain' },
+                                    headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         orderId: selectedOrderDetails.id,
                                         barbershopId: barbershopId,

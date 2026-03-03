@@ -245,6 +245,11 @@ export default function Dashboard() {
                 columns: ['Hora', 'Cliente', 'Barbeiro', 'Valor'],
                 data: data.detalheFaturamentoHoje || [],
             },
+            atendimentosHoje: {
+                title: 'Atendimentos Fechados Hoje',
+                columns: ['Hora', 'Cliente', 'Barbeiro', 'Valor'],
+                data: data.detalheAtendimentosHoje || [],
+            },
             comandasAbertas: {
                 title: 'Comandas Abertas — Detalhes',
                 columns: ['Hora Abertura', 'Cliente', 'Barbeiro', 'Valor Atual'],
@@ -326,6 +331,7 @@ export default function Dashboard() {
                             label="Atendimentos Hoje"
                             sub={`${data.kpis.atendimentosHojeClosed} de ${data.kpis.atendimentosHojeTotal} agendados`}
                             badgeColor="blue"
+                            onClick={() => openDrawer('atendimentosHoje')}
                         />
                         <KpiCard
                             icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
@@ -559,13 +565,13 @@ export default function Dashboard() {
                                 <div className="space-y-2">
                                     {detailModal.items.map((item, i) => (
                                         <div key={i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/50 border border-slate-700/40 hover:border-slate-600 transition-colors">
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-medium text-slate-200 truncate">{item.cliente}</p>
-                                                <p className="text-[11px] text-slate-500">{item.profissional}</p>
+                                            <div className="flex-1 min-w-0 pr-4">
+                                                <p className="text-sm font-medium text-slate-200 truncate" title={item.cliente}>{item.cliente}</p>
+                                                <p className="text-[11px] text-slate-500 truncate" title={item.profissional}>{item.profissional}</p>
                                             </div>
-                                            <div className="text-right flex-shrink-0 ml-3">
-                                                <p className="text-sm font-bold text-slate-300">{item.horario}</p>
-                                                <p className="text-[10px] text-slate-600">{item.data}</p>
+                                            <div className="text-right flex-shrink-0">
+                                                <p className="text-sm font-bold text-slate-300 whitespace-nowrap">{item.horario}</p>
+                                                <p className="text-[10px] text-slate-600 whitespace-nowrap">{item.data}</p>
                                             </div>
                                         </div>
                                     ))}
