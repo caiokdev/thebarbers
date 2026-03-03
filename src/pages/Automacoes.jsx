@@ -6,7 +6,7 @@ import { supabase } from '../supabaseClient';
 
 const DEFAULT_MESSAGES = {
     reminder: "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo! Falta cerca de 1 hora.",
-    feedback: "Olá {{cliente}}, o que achou do seu corte com {{barbeiro}}? Avalie nosso serviço!",
+    feedback: "Olá {{cliente}}, o que achou do serviço? Avalie a gente!",
     noshow: "Poxa {{cliente}}, sentimos sua falta hoje. Quer remarcar seu horário com {{barbeiro}}?",
 };
 
@@ -72,9 +72,9 @@ export default function Automacoes() {
             try {
                 const { data, error } = await supabase
                     .from('orders')
-                    .select('id, scheduled_at, reminder_failed, reminder_error_log, noshow_failed, noshow_error_log, clients(name, phone), professionals(name)')
+                    .select('id, scheduled_at, reminder_failed, reminder_error_log, noshow_failed, noshow_error_log, feedback_failed, feedback_error_log, clients(name, phone), professionals(name)')
                     .eq('barbershop_id', barbershopId)
-                    .or('reminder_failed.eq.true,noshow_failed.eq.true')
+                    .or('reminder_failed.eq.true,noshow_failed.eq.true,feedback_failed.eq.true')
                     .order('scheduled_at', { ascending: false });
 
                 if (error) throw error;
@@ -117,7 +117,11 @@ export default function Automacoes() {
         if (!phone) return '#';
 
         let baseMsg = "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo!";
-        if (log.noshow_failed) {
+        if (log.feedback_failed) {
+            baseMsg = messages.feedback || "Olá {{cliente}}, o que achou do serviço? Avalie a gente!";
+            const msg = baseMsg.replace(/\{\{cliente\}\}/g, log.clients?.name?.split(' ')[0] || 'Cliente');
+            return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`;
+        } else if (log.noshow_failed) {
             baseMsg = messages.noshow || "Poxa {{cliente}}, sentimos sua falta hoje. Quer remarcar seu horário com {{barbeiro}}?";
         } else if (log.reminder_failed) {
             baseMsg = messages.reminder || "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo! Falta cerca de 1 hora.";
@@ -147,7 +151,9 @@ export default function Automacoes() {
                     reminder_failed: false,
                     reminder_error_log: null,
                     noshow_failed: false,
-                    noshow_error_log: null
+                    noshow_error_log: null,
+                    feedback_failed: false,
+                    feedback_error_log: null
                 })
                 .eq('id', orderId);
             if (error) throw error;
@@ -186,10 +192,10 @@ export default function Automacoes() {
         const isConfigOpen = openConfig === key;
 
         return (
-            <div className={`bg-slate-900 border ${isConfigOpen ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-slate-800'} rounded-2xl flex flex-col relative group mb-6 transition-all duration-300`}>
+            <div className={`bg-slate-900 border ${isConfigOpen ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-slate-800'} rounded-2xl flex flex-col relative group transition-all duration-300 h-full`}>
                 <div className={`absolute top-0 right-0 w-32 h-32 ${theme.bg} opacity-5 blur-3xl rounded-full translate-x-10 -translate-y-10 transition-opacity duration-300 ${isActive ? 'opacity-20' : 'opacity-0'}`} />
 
-                <div className="p-6 relative z-10 lg:h-52 flex flex-col justify-between">
+                <div className="p-6 relative z-10 flex flex-col flex-1 h-full">
                     <div>
                         <div className="flex items-start justify-between mb-4">
                             <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors duration-300 ${isActive ? `${theme.bg} text-white` : 'bg-slate-800 text-slate-500'}`}>
@@ -210,7 +216,7 @@ export default function Automacoes() {
                         </div>
                     </div>
 
-                    <div className="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between">
+                    <div className="mt-auto pt-4 border-t border-slate-800/50 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <span className={`text-xs font-semibold px-2 py-1 rounded-md w-max ${isActive ? `${theme.text} ${theme.bgLight}` : 'text-slate-500 bg-slate-800'}`}>
                                 {isActive ? 'Ativo' : 'Inativo'}
@@ -233,9 +239,13 @@ export default function Automacoes() {
 
                         <div className="flex flex-wrap gap-2 mb-4">
                             <button onClick={() => insertVariable(key, '{{cliente}}')} className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded hover:bg-emerald-500/20 transition-colors">{'{{cliente}}'}</button>
-                            <button onClick={() => insertVariable(key, '{{barbeiro}}')} className="text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors">{'{{barbeiro}}'}</button>
-                            <button onClick={() => insertVariable(key, '{{data_hora}}')} className="text-[11px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded hover:bg-purple-500/20 transition-colors">{'{{data_hora}}'}</button>
-                            <button onClick={() => insertVariable(key, '{{barbearia}}')} className="text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded hover:bg-amber-500/20 transition-colors">{'{{barbearia}}'}</button>
+                            {key !== 'feedback' && (
+                                <>
+                                    <button onClick={() => insertVariable(key, '{{barbeiro}}')} className="text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors">{'{{barbeiro}}'}</button>
+                                    <button onClick={() => insertVariable(key, '{{data_hora}}')} className="text-[11px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded hover:bg-purple-500/20 transition-colors">{'{{data_hora}}'}</button>
+                                    <button onClick={() => insertVariable(key, '{{barbearia}}')} className="text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded hover:bg-amber-500/20 transition-colors">{'{{barbearia}}'}</button>
+                                </>
+                            )}
                         </div>
 
                         <textarea
@@ -295,7 +305,7 @@ export default function Automacoes() {
                             </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 items-start">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
                             {renderCard(
                                 'reminder',
                                 'Lembrete de Agendamento',
@@ -366,13 +376,16 @@ export default function Automacoes() {
                                                                 {log.noshow_failed && (
                                                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">Falta</span>
                                                                 )}
+                                                                {log.feedback_failed && (
+                                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">Pesquisa</span>
+                                                                )}
                                                             </div>
                                                             <div className="text-slate-300">{date.toLocaleDateString('pt-BR')}</div>
                                                             <div className="text-xs text-slate-500 mt-0.5">{date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • com {log.professionals?.name?.split(' ')[0] || 'Barbeiro'}</div>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <div className="text-rose-400 text-xs line-clamp-3 leading-relaxed" title={log.noshow_failed ? log.noshow_error_log : log.reminder_error_log}>
-                                                                {log.noshow_failed ? log.noshow_error_log : log.reminder_error_log || 'Falha desconhecida no webhook de envio.'}
+                                                            <div className="text-rose-400 text-xs line-clamp-3 leading-relaxed" title={log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log}>
+                                                                {log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log || 'Falha desconhecida no webhook de envio.'}
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-4 text-right">
