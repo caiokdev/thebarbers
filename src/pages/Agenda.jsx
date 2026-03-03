@@ -483,11 +483,20 @@ export default function Agenda() {
                             .eq('id', selectedOrderDetails.id);
                         if (error) { alert(`Erro ao marcar falta: ${error.message}`); return; }
 
-                        if (noshowActive) {
-                            try {
+                        try {
+                            // Buscar estado real-time para evitar bloqueios de state stale
+                            const { data: shop } = await supabase
+                                .from('barbershops')
+                                .select('noshow_active')
+                                .eq('id', barbershopId)
+                                .single();
+
+                            if (shop && shop.noshow_active) {
+                                // Envia POST no-cors para não tomar block de preflight do n8n se o CORS não tiver ativado lá
                                 await fetch('https://caiokdev.app.n8n.cloud/webhook-test/naocompareceu', {
                                     method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
+                                    mode: 'no-cors',
+                                    headers: { 'Content-Type': 'text/plain' },
                                     body: JSON.stringify({
                                         orderId: selectedOrderDetails.id,
                                         barbershopId: barbershopId,
@@ -496,9 +505,9 @@ export default function Agenda() {
                                         scheduledAt: selectedOrderDetails.scheduled_at,
                                     })
                                 });
-                            } catch (err) {
-                                console.error('Erro ao acionar webhook n8n (no_show):', err);
                             }
+                        } catch (err) {
+                            console.error('Erro ao acionar webhook n8n (no_show):', err);
                         }
 
                         setIsDetailsModalOpen(false);
