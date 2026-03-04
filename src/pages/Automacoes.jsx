@@ -364,7 +364,7 @@ export default function Automacoes() {
                             </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 items-stretch">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch mb-6">
                             {renderCard(
                                 'reminder',
                                 'Lembrete de Agendamento',
@@ -386,6 +386,8 @@ export default function Automacoes() {
                                 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
                                 'Imediato'
                             )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 items-stretch max-w-4xl mx-auto">
                             {renderCard(
                                 'rebook',
                                 'Reagendamento Express',
