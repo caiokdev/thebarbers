@@ -229,7 +229,7 @@ export default function Financeiro() {
                 (clients || []).forEach(c => { clientMap[c.id] = c.name; });
             }
             if (proIds.length > 0) {
-                const { data: pros } = await supabase.from('profiles').select('id, name, commission_rate').in('id', proIds);
+                const { data: pros } = await supabase.from('professionals').select('id, name, commission_rate').in('id', proIds);
                 const newRateMap = {};
                 (pros || []).forEach(p => { proMap[p.id] = p.name; newRateMap[p.id] = p.commission_rate ?? 50; });
                 setRateMap(newRateMap);
@@ -359,7 +359,7 @@ export default function Financeiro() {
         if (input === null) return;
         const newRate = parseFloat(input);
         if (isNaN(newRate) || newRate < 0 || newRate > 100) { alert('Valor inválido. Use um número entre 0 e 100.'); return; }
-        const { error } = await supabase.from('profiles').update({ commission_rate: newRate }).eq('id', proId);
+        const { error } = await supabase.from('professionals').update({ commission_rate: newRate }).eq('id', proId);
         if (error) { alert(`Erro: ${error.message}`); return; }
         setRateMap(prev => ({ ...prev, [proId]: newRate }));
     }

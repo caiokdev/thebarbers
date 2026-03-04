@@ -172,7 +172,7 @@ export default function Clientes() {
             const proIds = [...new Set((orders || []).map(o => o.professional_id).filter(Boolean))];
             let proMap = {};
             if (proIds.length > 0) {
-                const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', proIds);
+                const { data: profiles } = await supabase.from('professionals').select('id, name').in('id', proIds);
                 (profiles || []).forEach(p => { proMap[p.id] = p.name; });
             }
 
