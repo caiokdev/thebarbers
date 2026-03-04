@@ -8,6 +8,7 @@ const DEFAULT_MESSAGES = {
     reminder: "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo! Falta cerca de 1 hora.",
     feedback: "Olá {{cliente}}, o que achou do serviço? Avalie a gente!",
     noshow: "Poxa {{cliente}}, sentimos sua falta hoje. Quer remarcar seu horário com {{barbeiro}}?",
+    rebook: "E aí {{cliente}}, curtiu o corte? Já quer deixar o próximo garantido?",
 };
 
 export default function Automacoes() {
@@ -16,6 +17,7 @@ export default function Automacoes() {
         reminder: true,
         feedback: false,
         noshow: true,
+        rebook: false,
     });
 
     // Config messages state
@@ -36,7 +38,7 @@ export default function Automacoes() {
             try {
                 const { data: shop, error } = await supabase
                     .from('barbershops')
-                    .select('id, reminder_active, reminder_msg, feedback_active, feedback_msg, noshow_active, noshow_msg')
+                    .select('id, reminder_active, reminder_msg, feedback_active, feedback_msg, noshow_active, noshow_msg, rebook_active, rebook_msg')
                     .limit(1)
                     .single();
 
@@ -47,11 +49,13 @@ export default function Automacoes() {
                         reminder: shop.reminder_active ?? true,
                         feedback: shop.feedback_active ?? false,
                         noshow: shop.noshow_active ?? true,
+                        rebook: shop.rebook_active ?? false,
                     });
                     setMessages({
                         reminder: shop.reminder_msg ?? DEFAULT_MESSAGES.reminder,
                         feedback: shop.feedback_msg ?? DEFAULT_MESSAGES.feedback,
                         noshow: shop.noshow_msg ?? DEFAULT_MESSAGES.noshow,
+                        rebook: shop.rebook_msg ?? DEFAULT_MESSAGES.rebook,
                     });
                 }
             } catch (error) {
@@ -72,9 +76,9 @@ export default function Automacoes() {
             try {
                 const { data, error } = await supabase
                     .from('orders')
-                    .select('id, scheduled_at, reminder_failed, reminder_error_log, noshow_failed, noshow_error_log, feedback_failed, feedback_error_log, clients(name, phone), professionals(name)')
+                    .select('id, scheduled_at, reminder_failed, reminder_error_log, noshow_failed, noshow_error_log, feedback_failed, feedback_error_log, rebook_failed, rebook_error_log, clients(name, phone), professionals(name)')
                     .eq('barbershop_id', barbershopId)
-                    .or('reminder_failed.eq.true,noshow_failed.eq.true,feedback_failed.eq.true')
+                    .or('reminder_failed.eq.true,noshow_failed.eq.true,feedback_failed.eq.true,rebook_failed.eq.true')
                     .order('scheduled_at', { ascending: false });
 
                 if (error) throw error;
@@ -98,7 +102,9 @@ export default function Automacoes() {
                     feedback_active: toggles.feedback,
                     feedback_msg: messages.feedback,
                     noshow_active: toggles.noshow,
-                    noshow_msg: messages.noshow
+                    noshow_msg: messages.noshow,
+                    rebook_active: toggles.rebook,
+                    rebook_msg: messages.rebook,
                 })
                 .eq('id', barbershopId);
 
@@ -117,7 +123,11 @@ export default function Automacoes() {
         if (!phone) return '#';
 
         let baseMsg = "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo!";
-        if (log.feedback_failed) {
+        if (log.rebook_failed) {
+            baseMsg = messages.rebook || DEFAULT_MESSAGES.rebook;
+            const msg = baseMsg.replace(/\{\{cliente\}\}/g, log.clients?.name?.split(' ')[0] || 'Cliente');
+            return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`;
+        } else if (log.feedback_failed) {
             baseMsg = messages.feedback || "Olá {{cliente}}, o que achou do serviço? Avalie a gente!";
             const msg = baseMsg.replace(/\{\{cliente\}\}/g, log.clients?.name?.split(' ')[0] || 'Cliente');
             return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`;
@@ -153,7 +163,9 @@ export default function Automacoes() {
                     noshow_failed: false,
                     noshow_error_log: null,
                     feedback_failed: false,
-                    feedback_error_log: null
+                    feedback_error_log: null,
+                    rebook_failed: false,
+                    rebook_error_log: null
                 })
                 .eq('id', orderId);
             if (error) throw error;
@@ -239,7 +251,7 @@ export default function Automacoes() {
 
                         <div className="flex flex-wrap gap-2 mb-4">
                             <button onClick={() => insertVariable(key, '{{cliente}}')} className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded hover:bg-emerald-500/20 transition-colors">{'{{cliente}}'}</button>
-                            {key !== 'feedback' && (
+                            {key !== 'feedback' && key !== 'rebook' && (
                                 <>
                                     <button onClick={() => insertVariable(key, '{{barbeiro}}')} className="text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors">{'{{barbeiro}}'}</button>
                                     <button onClick={() => insertVariable(key, '{{data_hora}}')} className="text-[11px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded hover:bg-purple-500/20 transition-colors">{'{{data_hora}}'}</button>
@@ -305,7 +317,7 @@ export default function Automacoes() {
                             </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
                             {renderCard(
                                 'reminder',
                                 'Lembrete de Agendamento',
@@ -326,6 +338,13 @@ export default function Automacoes() {
                                 'Aborda o cliente automaticamente assim que marcado como "Não Compareceu" para reagendar.',
                                 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
                                 'Imediato'
+                            )}
+                            {renderCard(
+                                'rebook',
+                                'Reagendamento Express',
+                                'Aproveita a janela gratuita de 24h do WhatsApp para incentivar o reagendamento de clientes que marcaram e cortaram no mesmo dia.',
+                                'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+                                '+23 Horas'
                             )}
                         </div>
 
@@ -379,13 +398,16 @@ export default function Automacoes() {
                                                                 {log.feedback_failed && (
                                                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">Pesquisa</span>
                                                                 )}
+                                                                {log.rebook_failed && (
+                                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-500/10 text-sky-400 border border-sky-500/20">Reagendamento</span>
+                                                                )}
                                                             </div>
                                                             <div className="text-slate-300">{date.toLocaleDateString('pt-BR')}</div>
                                                             <div className="text-xs text-slate-500 mt-0.5">{date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • com {log.professionals?.name?.split(' ')[0] || 'Barbeiro'}</div>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <div className="text-rose-400 text-xs line-clamp-3 leading-relaxed" title={log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log}>
-                                                                {log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log || 'Falha desconhecida no webhook de envio.'}
+                                                            <div className="text-rose-400 text-xs line-clamp-3 leading-relaxed" title={log.rebook_failed ? log.rebook_error_log : log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log}>
+                                                                {log.rebook_failed ? log.rebook_error_log : log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log || 'Falha desconhecida no webhook de envio.'}
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-4 text-right">
