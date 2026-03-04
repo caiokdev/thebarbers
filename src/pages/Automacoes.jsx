@@ -9,6 +9,7 @@ const DEFAULT_MESSAGES = {
     feedback: "Olá {{cliente}}, o que achou do serviço? Avalie a gente!",
     noshow: "Poxa {{cliente}}, sentimos sua falta hoje. Quer remarcar seu horário com {{barbeiro}}?",
     rebook: "E aí {{cliente}}, curtiu o corte? Já quer deixar o próximo garantido?",
+    birthday: "Parabéns {{cliente}}! Feliz aniversário! Como presente, você tem um desconto especial na nossa barbearia hoje!",
 };
 
 export default function Automacoes() {
@@ -18,11 +19,12 @@ export default function Automacoes() {
         feedback: false,
         noshow: true,
         rebook: false,
+        birthday: false,
     });
 
     // Config messages state
     const [messages, setMessages] = useState(DEFAULT_MESSAGES);
-    const [openConfig, setOpenConfig] = useState(null); // 'reminder', 'feedback', 'noshow'
+    const [openConfig, setOpenConfig] = useState(null); // 'reminder', 'feedback', 'noshow', 'birthday'
     const textRef = useRef(null);
 
     const [barbershopId, setBarbershopId] = useState(null);
@@ -38,7 +40,7 @@ export default function Automacoes() {
             try {
                 const { data: shop, error } = await supabase
                     .from('barbershops')
-                    .select('id, reminder_active, reminder_msg, feedback_active, feedback_msg, noshow_active, noshow_msg, rebook_active, rebook_msg')
+                    .select('id, reminder_active, reminder_msg, feedback_active, feedback_msg, noshow_active, noshow_msg, rebook_active, rebook_msg, birthday_active, birthday_msg')
                     .limit(1)
                     .single();
 
@@ -50,12 +52,14 @@ export default function Automacoes() {
                         feedback: shop.feedback_active ?? false,
                         noshow: shop.noshow_active ?? true,
                         rebook: shop.rebook_active ?? false,
+                        birthday: shop.birthday_active ?? false,
                     });
                     setMessages({
                         reminder: shop.reminder_msg ?? DEFAULT_MESSAGES.reminder,
                         feedback: shop.feedback_msg ?? DEFAULT_MESSAGES.feedback,
                         noshow: shop.noshow_msg ?? DEFAULT_MESSAGES.noshow,
                         rebook: shop.rebook_msg ?? DEFAULT_MESSAGES.rebook,
+                        birthday: shop.birthday_msg ?? DEFAULT_MESSAGES.birthday,
                     });
                 }
             } catch (error) {
@@ -74,15 +78,33 @@ export default function Automacoes() {
         async function fetchFailedLogs() {
             if (!barbershopId) return;
             try {
-                const { data, error } = await supabase
-                    .from('orders')
-                    .select('id, scheduled_at, reminder_failed, reminder_error_log, noshow_failed, noshow_error_log, feedback_failed, feedback_error_log, rebook_failed, rebook_error_log, clients(name, phone), professionals(name)')
-                    .eq('barbershop_id', barbershopId)
-                    .or('reminder_failed.eq.true,noshow_failed.eq.true,feedback_failed.eq.true,rebook_failed.eq.true')
-                    .order('scheduled_at', { ascending: false });
+                const [ordersRes, clientsRes] = await Promise.all([
+                    supabase
+                        .from('orders')
+                        .select('id, scheduled_at, reminder_failed, reminder_error_log, noshow_failed, noshow_error_log, feedback_failed, feedback_error_log, rebook_failed, rebook_error_log, clients(name, phone), professionals(name)')
+                        .eq('barbershop_id', barbershopId)
+                        .or('reminder_failed.eq.true,noshow_failed.eq.true,feedback_failed.eq.true,rebook_failed.eq.true')
+                        .order('scheduled_at', { ascending: false }),
+                    supabase
+                        .from('clients')
+                        .select('id, name, phone, birth_date, birthday_failed, birthday_error_log')
+                        .eq('barbershop_id', barbershopId)
+                        .eq('birthday_failed', true)
+                ]);
 
-                if (error) throw error;
-                setFailedLogs(data || []);
+                if (ordersRes.error) throw ordersRes.error;
+                if (clientsRes.error) throw clientsRes.error;
+
+                const ordersData = (ordersRes.data || []).map(order => ({ ...order, logType: 'order' }));
+                const clientsData = (clientsRes.data || []).map(client => ({ ...client, logType: 'client' }));
+
+                const combinedLogs = [...ordersData, ...clientsData].sort((a, b) => {
+                    const dateA = new Date(a.scheduled_at || a.birth_date || 0);
+                    const dateB = new Date(b.scheduled_at || b.birth_date || 0);
+                    return dateB - dateA;
+                });
+
+                setFailedLogs(combinedLogs);
             } catch (error) {
                 console.error('Erro ao buscar falhas:', error);
             }
@@ -105,6 +127,8 @@ export default function Automacoes() {
                     noshow_msg: messages.noshow,
                     rebook_active: toggles.rebook,
                     rebook_msg: messages.rebook,
+                    birthday_active: toggles.birthday,
+                    birthday_msg: messages.birthday,
                 })
                 .eq('id', barbershopId);
 
@@ -119,17 +143,29 @@ export default function Automacoes() {
     };
 
     const generateWhatsAppLink = (log) => {
-        const phone = log.clients?.phone?.replace(/\D/g, '');
+        let phone;
+        if (log.logType === 'client') {
+            phone = log.phone?.replace(/\D/g, '');
+        } else {
+            phone = log.clients?.phone?.replace(/\D/g, '');
+        }
+
         if (!phone) return '#';
 
         let baseMsg = "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo!";
-        if (log.rebook_failed) {
+        let clientName = log.logType === 'client' ? (log.name?.split(' ')[0] || 'Cliente') : (log.clients?.name?.split(' ')[0] || 'Cliente');
+
+        if (log.birthday_failed) {
+            baseMsg = messages.birthday || DEFAULT_MESSAGES.birthday;
+            const msg = baseMsg.replace(/\{\{cliente\}\}/g, clientName);
+            return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`;
+        } else if (log.rebook_failed) {
             baseMsg = messages.rebook || DEFAULT_MESSAGES.rebook;
-            const msg = baseMsg.replace(/\{\{cliente\}\}/g, log.clients?.name?.split(' ')[0] || 'Cliente');
+            const msg = baseMsg.replace(/\{\{cliente\}\}/g, clientName);
             return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`;
         } else if (log.feedback_failed) {
             baseMsg = messages.feedback || "Olá {{cliente}}, o que achou do serviço? Avalie a gente!";
-            const msg = baseMsg.replace(/\{\{cliente\}\}/g, log.clients?.name?.split(' ')[0] || 'Cliente');
+            const msg = baseMsg.replace(/\{\{cliente\}\}/g, clientName);
             return `https://wa.me/55${phone}?text=${encodeURIComponent(msg)}`;
         } else if (log.noshow_failed) {
             baseMsg = messages.noshow || "Poxa {{cliente}}, sentimos sua falta hoje. Quer remarcar seu horário com {{barbeiro}}?";
@@ -144,7 +180,7 @@ export default function Automacoes() {
         const dataHoraStr = `${formattedDate} às ${formattedTime}`;
 
         const msg = baseMsg
-            .replace(/\{\{cliente\}\}/g, log.clients?.name?.split(' ')[0] || 'Cliente')
+            .replace(/\{\{cliente\}\}/g, clientName)
             .replace(/\{\{barbeiro\}\}/g, log.professionals?.name?.split(' ')[0] || 'Barbeiro')
             .replace(/\{\{data_hora\}\}/g, dataHoraStr)
             .replace(/\{\{barbearia\}\}/g, 'nossa barbearia'); // genérico para caso tenha a tag
@@ -153,23 +189,34 @@ export default function Automacoes() {
         return `https://wa.me/55${phone}?text=${encodedMsg}`;
     };
 
-    const handleResolveError = async (orderId) => {
+    const handleResolveError = async (logId, logType) => {
         try {
-            const { error } = await supabase
-                .from('orders')
-                .update({
-                    reminder_failed: false,
-                    reminder_error_log: null,
-                    noshow_failed: false,
-                    noshow_error_log: null,
-                    feedback_failed: false,
-                    feedback_error_log: null,
-                    rebook_failed: false,
-                    rebook_error_log: null
-                })
-                .eq('id', orderId);
-            if (error) throw error;
-            setFailedLogs(prev => prev.filter(o => o.id !== orderId));
+            if (logType === 'client') {
+                const { error } = await supabase
+                    .from('clients')
+                    .update({
+                        birthday_failed: false,
+                        birthday_error_log: null
+                    })
+                    .eq('id', logId);
+                if (error) throw error;
+            } else {
+                const { error } = await supabase
+                    .from('orders')
+                    .update({
+                        reminder_failed: false,
+                        reminder_error_log: null,
+                        noshow_failed: false,
+                        noshow_error_log: null,
+                        feedback_failed: false,
+                        feedback_error_log: null,
+                        rebook_failed: false,
+                        rebook_error_log: null
+                    })
+                    .eq('id', logId);
+                if (error) throw error;
+            }
+            setFailedLogs(prev => prev.filter(o => o.id !== logId));
         } catch (error) {
             console.error("Erro ao resolver falha", error);
             alert("Erro ao resolver falha no banco.");
@@ -251,7 +298,7 @@ export default function Automacoes() {
 
                         <div className="flex flex-wrap gap-2 mb-4">
                             <button onClick={() => insertVariable(key, '{{cliente}}')} className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded hover:bg-emerald-500/20 transition-colors">{'{{cliente}}'}</button>
-                            {key !== 'feedback' && key !== 'rebook' && (
+                            {key !== 'feedback' && key !== 'rebook' && key !== 'birthday' && (
                                 <>
                                     <button onClick={() => insertVariable(key, '{{barbeiro}}')} className="text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors">{'{{barbeiro}}'}</button>
                                     <button onClick={() => insertVariable(key, '{{data_hora}}')} className="text-[11px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded hover:bg-purple-500/20 transition-colors">{'{{data_hora}}'}</button>
@@ -317,7 +364,7 @@ export default function Automacoes() {
                             </button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 items-stretch">
                             {renderCard(
                                 'reminder',
                                 'Lembrete de Agendamento',
@@ -345,6 +392,13 @@ export default function Automacoes() {
                                 'Aproveita a janela gratuita de 24h do WhatsApp para incentivar o reagendamento de clientes que marcaram e cortaram no mesmo dia.',
                                 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
                                 '+23 Horas'
+                            )}
+                            {renderCard(
+                                'birthday',
+                                'Promoção de Aniversário',
+                                'Fidelize clientes enviando uma mensagem automática de parabéns com um desconto especial.',
+                                'M21 15.546c-.523 0-1.046.151-1.5.454a2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0 2.701 2.701 0 00-1.5-.454M9 6v2m3-2v2m3-2v2M9 3h.01M12 3h.01M15 3h.01M21 21v-7a2 2 0 00-2-2H5a2 2 0 00-2 2v7h18zm-3-9v-2a2 2 0 00-2-2H8a2 2 0 00-2 2v2h12z',
+                                '-1 Dia'
                             )}
                         </div>
 
@@ -379,16 +433,22 @@ export default function Automacoes() {
                                         </thead>
                                         <tbody className="divide-y divide-slate-800/50">
                                             {failedLogs.map(log => {
-                                                const date = new Date(log.scheduled_at);
-                                                const phone = log.clients?.phone?.replace(/\D/g, '');
+                                                const date = log.logType === 'client' ? new Date(log.birth_date + 'T00:00:00') : new Date(log.scheduled_at);
+                                                const phone = log.logType === 'client' ? log.phone?.replace(/\D/g, '') : log.clients?.phone?.replace(/\D/g, '');
+                                                const clientName = log.logType === 'client' ? log.name : log.clients?.name;
+                                                const clientPhone = log.logType === 'client' ? log.phone : log.clients?.phone;
+
                                                 return (
-                                                    <tr key={log.id} className="hover:bg-slate-800/30 transition-colors group">
+                                                    <tr key={`${log.logType}-${log.id}`} className="hover:bg-slate-800/30 transition-colors group">
                                                         <td className="px-4 py-4">
-                                                            <div className="font-medium text-slate-200">{log.clients?.name || 'Cliente Avulso'}</div>
-                                                            <div className="text-xs text-slate-500 mt-0.5">{log.clients?.phone || 'Sem Telefone cadastrado'}</div>
+                                                            <div className="font-medium text-slate-200">{clientName || 'Cliente Avulso'}</div>
+                                                            <div className="text-xs text-slate-500 mt-0.5">{clientPhone || 'Sem Telefone cadastrado'}</div>
                                                         </td>
                                                         <td className="px-4 py-4 whitespace-nowrap">
                                                             <div className="flex items-center gap-2 mb-1">
+                                                                {log.birthday_failed && (
+                                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20">Aniversário</span>
+                                                                )}
                                                                 {log.reminder_failed && (
                                                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">Lembrete</span>
                                                                 )}
@@ -403,11 +463,13 @@ export default function Automacoes() {
                                                                 )}
                                                             </div>
                                                             <div className="text-slate-300">{date.toLocaleDateString('pt-BR')}</div>
-                                                            <div className="text-xs text-slate-500 mt-0.5">{date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • com {log.professionals?.name?.split(' ')[0] || 'Barbeiro'}</div>
+                                                            <div className="text-xs text-slate-500 mt-0.5">
+                                                                {log.logType !== 'client' ? `${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • com ${log.professionals?.name?.split(' ')[0] || 'Barbeiro'}` : 'Data de Nascimento'}
+                                                            </div>
                                                         </td>
                                                         <td className="px-4 py-4">
-                                                            <div className="text-rose-400 text-xs line-clamp-3 leading-relaxed" title={log.rebook_failed ? log.rebook_error_log : log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log}>
-                                                                {log.rebook_failed ? log.rebook_error_log : log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log || 'Falha desconhecida no webhook de envio.'}
+                                                            <div className="text-rose-400 text-xs line-clamp-3 leading-relaxed" title={log.birthday_failed ? log.birthday_error_log : log.rebook_failed ? log.rebook_error_log : log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log}>
+                                                                {log.birthday_failed ? log.birthday_error_log : log.rebook_failed ? log.rebook_error_log : log.feedback_failed ? log.feedback_error_log : log.noshow_failed ? log.noshow_error_log : log.reminder_error_log || 'Falha desconhecida no webhook de envio.'}
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-4 text-right">
@@ -417,7 +479,7 @@ export default function Automacoes() {
                                                                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" /></svg>
                                                                     </a>
                                                                 ) : null}
-                                                                <button onClick={() => handleResolveError(log.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors border border-slate-700" title="Marcar como Resolvido">
+                                                                <button onClick={() => handleResolveError(log.id, log.logType)} className="p-2 bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors border border-slate-700" title="Marcar como Resolvido">
                                                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                                                                 </button>
                                                             </div>
