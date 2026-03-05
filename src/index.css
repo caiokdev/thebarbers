@@ -1,1 +1,40 @@
 @import "tailwindcss";
+
+/* ── The Barbers Brand Design System ── */
+:root {
+    --brand-red: #dc2626;
+    --brand-red-light: rgba(220, 38, 38, 0.15);
+    --brand-red-border: rgba(220, 38, 38, 0.3);
+    --brand-gold: #B59410;
+    --brand-gold-light: rgba(181, 148, 16, 0.15);
+    --brand-gold-border: rgba(181, 148, 16, 0.3);
+    --brand-black: #0a0a0a;
+    --brand-surface: #0f0f0f;
+    --brand-card: #141414;
+    --brand-card-border: rgba(255, 255, 255, 0.06);
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(220, 38, 38, 0.25);
+    border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(220, 38, 38, 0.5);
+}
+
+/* Brand switch toggle override */
+input[type="checkbox"]:checked~.peer-checked\:bg-emerald-500,
+.peer:checked~.peer-checked\:bg-emerald-500 {
+    background-color: var(--brand-red) !important;
+}

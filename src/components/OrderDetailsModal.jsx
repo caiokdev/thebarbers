@@ -8,7 +8,7 @@ const STATUS_CONFIG = {
     scheduled: { label: 'Agendado', bg: 'bg-blue-500/15', text: 'text-blue-400', border: 'border-blue-500/30' },
     confirmed: { label: 'Confirmado', bg: 'bg-cyan-500/15', text: 'text-cyan-400', border: 'border-cyan-500/30' },
     open: { label: 'Aberto', bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/30' },
-    completed: { label: 'Concluído', bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+    completed: { label: 'Concluído', bg: 'bg-red-600/15', text: 'text-red-500', border: 'border-red-600/30' },
     canceled: { label: 'Cancelado', bg: 'bg-rose-500/15', text: 'text-rose-400', border: 'border-rose-500/30' },
     no_show: { label: 'Não Compareceu', bg: 'bg-slate-500/15', text: 'text-slate-400', border: 'border-slate-500/30' },
 };
@@ -64,8 +64,8 @@ export default function OrderDetailsModal({ order, clientMap, proMap, onClose, o
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-emerald-500/15 rounded-xl flex items-center justify-center">
-                            <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <div className="w-12 h-12 bg-red-600/15 rounded-xl flex items-center justify-center">
+                            <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                         </div>
@@ -102,7 +102,7 @@ export default function OrderDetailsModal({ order, clientMap, proMap, onClose, o
                     </div>
                     <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
                         <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Valor</p>
-                        <p className="text-sm font-bold text-emerald-400">{formatCurrency(order.total_amount)}</p>
+                        <p className="text-sm font-bold text-red-500">{formatCurrency(order.total_amount)}</p>
                     </div>
                 </div>
 
@@ -143,7 +143,7 @@ export default function OrderDetailsModal({ order, clientMap, proMap, onClose, o
                                     disabled={actionLoading || order.status === 'open'}
                                     className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${order.status === 'open'
                                         ? 'text-amber-300 bg-amber-500/10 border border-amber-500/20 cursor-not-allowed opacity-70'
-                                        : 'text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 disabled:opacity-50'
+                                        : 'text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50'
                                         }`}
                                 >
                                     {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (

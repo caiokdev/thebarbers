@@ -256,7 +256,7 @@ export default function Configuracoes() {
                 <Sidebar />
                 <main className="flex-1 flex items-center justify-center">
                     <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4" />
+                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4" />
                         <p className="text-slate-500 text-sm">Carregando configurações...</p>
                     </div>
                 </main>
@@ -284,7 +284,7 @@ export default function Configuracoes() {
                                 key={tab.key}
                                 onClick={() => setActiveTab(tab.key)}
                                 className={`px-5 py-3 text-sm font-medium rounded-t-xl transition-all ${activeTab === tab.key
-                                    ? 'bg-slate-900 text-emerald-400 border-t-2 border-x border-emerald-500 border-slate-700'
+                                    ? 'bg-slate-900 text-red-500 border-t-2 border-x border-emerald-500 border-slate-700'
                                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
                                     }`}
                             >
@@ -307,19 +307,19 @@ export default function Configuracoes() {
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nome</label>
                                         <input type="text" value={shopData.name} onChange={e => setShopData(p => ({ ...p, name: e.target.value }))}
-                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Endereço</label>
                                         <input type="text" value={shopData.address} onChange={e => setShopData(p => ({ ...p, address: e.target.value }))}
                                             placeholder="Rua, número, bairro, cidade"
-                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Telefone / WhatsApp</label>
                                         <input type="text" value={shopData.phone} onChange={e => setShopData(p => ({ ...p, phone: e.target.value }))}
                                             placeholder="(11) 99999-9999"
-                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                                     </div>
                                 </div>
 
@@ -375,11 +375,11 @@ export default function Configuracoes() {
                                                 {/* Toggle */}
                                                 <button
                                                     onClick={() => updateHour(day.key, 'is_closed', !h.is_closed)}
-                                                    className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${h.is_closed ? 'bg-slate-700' : 'bg-emerald-500'}`}
+                                                    className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${h.is_closed ? 'bg-slate-700' : 'bg-red-600'}`}
                                                 >
                                                     <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${h.is_closed ? 'left-0.5' : 'left-[26px]'}`} />
                                                 </button>
-                                                <span className={`text-xs font-medium w-16 flex-shrink-0 ${h.is_closed ? 'text-rose-400' : 'text-emerald-400'}`}>
+                                                <span className={`text-xs font-medium w-16 flex-shrink-0 ${h.is_closed ? 'text-rose-400' : 'text-red-500'}`}>
                                                     {h.is_closed ? 'Fechado' : 'Aberto'}
                                                 </span>
 
@@ -388,11 +388,11 @@ export default function Configuracoes() {
                                                     <>
                                                         <input type="time" value={h.open_time || '09:00'}
                                                             onChange={e => updateHour(day.key, 'open_time', e.target.value)}
-                                                            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 [color-scheme:dark]" />
+                                                            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-red-600 [color-scheme:dark]" />
                                                         <span className="text-slate-500 text-xs">até</span>
                                                         <input type="time" value={h.close_time || '20:00'}
                                                             onChange={e => updateHour(day.key, 'close_time', e.target.value)}
-                                                            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 [color-scheme:dark]" />
+                                                            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-red-600 [color-scheme:dark]" />
                                                     </>
                                                 )}
                                             </div>
@@ -402,7 +402,7 @@ export default function Configuracoes() {
 
                                 <div className="flex justify-end mt-6 pt-5 border-t border-slate-700">
                                     <button onClick={handleSaveHours} disabled={savingHours}
-                                        className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center gap-2">
+                                        className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center gap-2">
                                         {savingHours && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                                         {savingHours ? 'Salvando...' : 'Salvar Horários'}
                                     </button>
@@ -422,7 +422,7 @@ export default function Configuracoes() {
                                         <p className="text-xs text-slate-500">Serviços disponíveis para agendamento</p>
                                     </div>
                                     <button onClick={openNewService}
-                                        className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20">
+                                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-red-600/20">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                                         Novo Serviço
                                     </button>
@@ -461,7 +461,7 @@ export default function Configuracoes() {
                                                                 {svc.duration_minutes || 30} min
                                                             </span>
                                                         </td>
-                                                        <td className="px-6 py-4 text-right font-semibold text-emerald-400">{formatBRL(svc.price)}</td>
+                                                        <td className="px-6 py-4 text-right font-semibold text-red-500">{formatBRL(svc.price)}</td>
                                                     </tr>
                                                 ))
                                             )}
@@ -482,7 +482,7 @@ export default function Configuracoes() {
                                         <p className="text-xs text-slate-500">Barbeiros e profissionais cadastrados</p>
                                     </div>
                                     <button onClick={openNewPro}
-                                        className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20">
+                                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-red-600/20">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                                         Novo Profissional
                                     </button>
@@ -546,7 +546,7 @@ export default function Configuracoes() {
                                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nome do Serviço *</label>
                                 <input type="text" value={serviceForm.name} onChange={e => setServiceForm(p => ({ ...p, name: e.target.value }))}
                                     placeholder="Ex: Corte Degradê"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
@@ -554,13 +554,13 @@ export default function Configuracoes() {
                                     <input type="number" step="0.01" min="0" value={serviceForm.price}
                                         onChange={e => setServiceForm(p => ({ ...p, price: e.target.value }))}
                                         placeholder="0,00"
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Duração (min)</label>
                                     <select value={serviceForm.duration_minutes}
                                         onChange={e => setServiceForm(p => ({ ...p, duration_minutes: parseInt(e.target.value) }))}
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors">
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors">
                                         <option value={15}>15 min</option>
                                         <option value={30}>30 min</option>
                                         <option value={45}>45 min</option>
@@ -578,7 +578,7 @@ export default function Configuracoes() {
                                 Cancelar
                             </button>
                             <button onClick={handleSaveService} disabled={savingService}
-                                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
                                 {savingService && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                                 {savingService ? 'Salvando...' : (editingService ? 'Salvar' : 'Cadastrar Serviço')}
                             </button>
@@ -614,18 +614,18 @@ export default function Configuracoes() {
                                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Nome *</label>
                                 <input type="text" value={proForm.name} onChange={e => setProForm(p => ({ ...p, name: e.target.value }))}
                                     placeholder="Nome completo"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Telefone</label>
                                 <input type="text" value={proForm.phone} onChange={e => setProForm(p => ({ ...p, phone: e.target.value }))}
                                     placeholder="(11) 99999-9999"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Especialidade</label>
                                 <select value={proForm.specialty} onChange={e => setProForm(p => ({ ...p, specialty: e.target.value }))}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors">
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors">
                                     <option value="Barbeiro">Barbeiro</option>
                                     <option value="Cabeleireiro">Cabeleireiro</option>
                                     <option value="Assistente">Assistente</option>
@@ -639,7 +639,7 @@ export default function Configuracoes() {
                                 Cancelar
                             </button>
                             <button onClick={handleSavePro} disabled={savingPro}
-                                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
                                 {savingPro && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                                 {savingPro ? 'Salvando...' : (editingPro ? 'Salvar' : 'Cadastrar')}
                             </button>

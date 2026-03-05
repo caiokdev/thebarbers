@@ -339,7 +339,7 @@ export default function PDV() {
                     {loading ? (
                         <div className="flex items-center justify-center h-full">
                             <div className="text-center">
-                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4" />
+                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4" />
                                 <p className="text-slate-500 text-sm">Carregando comanda...</p>
                             </div>
                         </div>
@@ -350,7 +350,7 @@ export default function PDV() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                                 <p className="text-slate-400 text-sm">Comanda não encontrada.</p>
-                                <button onClick={() => navigate(-1)} className="mt-4 text-emerald-400 text-sm hover:underline">← Voltar</button>
+                                <button onClick={() => navigate(-1)} className="mt-4 text-red-500 text-sm hover:underline">← Voltar</button>
                             </div>
                         </div>
                     ) : (
@@ -359,7 +359,7 @@ export default function PDV() {
                             <div className="lg:col-span-3 space-y-5">
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                                     <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                         </svg>
                                         Resumo da Comanda
@@ -406,7 +406,7 @@ export default function PDV() {
                                                     </div>
 
                                                     {/* Subtotal */}
-                                                    <p className="text-sm font-semibold text-emerald-400 w-24 text-right ml-3">
+                                                    <p className="text-sm font-semibold text-red-500 w-24 text-right ml-3">
                                                         R$ {(item.price * item.quantity).toFixed(2).replace('.', ',')}
                                                     </p>
 
@@ -436,14 +436,14 @@ export default function PDV() {
                                     <div className="relative mt-4">
                                         <div className="flex items-center gap-2">
                                             <div className="relative flex-1">
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400 text-lg">+</span>
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-red-500 text-lg">+</span>
                                                 <input
                                                     type="text"
                                                     value={catalogSearch}
                                                     onChange={e => { setCatalogSearch(e.target.value); setShowCatalog(true); }}
                                                     onFocus={() => setShowCatalog(true)}
                                                     placeholder="Adicionar serviço ou produto..."
-                                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                                 />
                                             </div>
                                         </div>
@@ -476,7 +476,7 @@ export default function PDV() {
                                                                     <span className="text-[9px] text-amber-400">({cItem.current_stock} un.)</span>
                                                                 )}
                                                             </div>
-                                                            <span className="text-xs font-semibold text-emerald-400">
+                                                            <span className="text-xs font-semibold text-red-500">
                                                                 R$ {cItem.price.toFixed(2).replace('.', ',')}
                                                             </span>
                                                         </button>
@@ -508,7 +508,7 @@ export default function PDV() {
                                     {/* ── Total ── */}
                                     <div className="flex items-center justify-between mt-5 pt-4 border-t border-slate-700">
                                         <span className="text-sm text-slate-400">Total da Comanda</span>
-                                        <span className="text-2xl font-bold text-emerald-400">
+                                        <span className="text-2xl font-bold text-red-500">
                                             R$ {cartTotal.toFixed(2).replace('.', ',')}
                                         </span>
                                     </div>
@@ -519,7 +519,7 @@ export default function PDV() {
                             <div className="lg:col-span-2 space-y-5">
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                                     <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                                         </svg>
                                         Pagamento
@@ -529,7 +529,7 @@ export default function PDV() {
                                     <div className="bg-slate-900/60 border border-slate-700/50 rounded-xl p-4 mb-4">
                                         <div className="flex items-center justify-between">
                                             <span className="text-sm text-slate-400">{comandaItems.length} {comandaItems.length === 1 ? 'item' : 'itens'}</span>
-                                            <span className="text-lg font-bold text-emerald-400">R$ {cartTotal.toFixed(2).replace('.', ',')}</span>
+                                            <span className="text-lg font-bold text-red-500">R$ {cartTotal.toFixed(2).replace('.', ',')}</span>
                                         </div>
                                     </div>
 
@@ -541,7 +541,7 @@ export default function PDV() {
                                                 key={pm.key}
                                                 onClick={() => setSelectedPaymentMethod(pm.key)}
                                                 className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 ${selectedPaymentMethod === pm.key
-                                                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30'
+                                                    ? 'border-emerald-500 bg-red-600/10 text-red-500 ring-1 ring-emerald-500/30'
                                                     : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800 hover:text-slate-300'
                                                     }`}
                                             >
@@ -556,8 +556,8 @@ export default function PDV() {
                                         onClick={handleFinalizeComanda}
                                         disabled={!selectedPaymentMethod || finalizing || comandaItems.length === 0}
                                         className={`w-full mt-6 px-6 py-4 rounded-xl text-base font-bold text-white flex items-center justify-center gap-2 transition-all duration-200 ${selectedPaymentMethod && !finalizing && comandaItems.length > 0
-                                            ? 'bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/25 cursor-pointer'
-                                            : 'bg-emerald-500/50 cursor-not-allowed opacity-50'
+                                            ? 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/25 cursor-pointer'
+                                            : 'bg-red-600/50 cursor-not-allowed opacity-50'
                                             }`}
                                     >
                                         {finalizing ? (

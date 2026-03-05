@@ -83,6 +83,8 @@ export default function Financeiro() {
     const [expandedModalOrderId, setExpandedModalOrderId] = useState(null);
     const [expandedHistoricoOrderId, setExpandedHistoricoOrderId] = useState(null);
     const [expandedProfessionalId, setExpandedProfessionalId] = useState(null);
+    const [clientMapState, setClientMapState] = useState({});
+
 
 
     // ── Expense modal ──
@@ -246,6 +248,8 @@ export default function Financeiro() {
                 setRateMap(newRateMap);
             }
             setProMapState(proMap);
+            setClientMapState(clientMap);
+
 
             // Store all closed orders for commission calculation
             setAllClosedOrders((historico || []).map(o => ({
@@ -318,8 +322,12 @@ export default function Financeiro() {
             if (!pid) return;
             if (!grouped[pid]) grouped[pid] = { nome: proMapState[pid] || 'Sem nome', total: 0, orders: [] };
             grouped[pid].total += o.total_amount;
-            grouped[pid].orders.push(o);
+            grouped[pid].orders.push({
+                ...o,
+                cliente: clientMapState[o.client_id] || 'Cliente Avulso',
+            });
         });
+
         return Object.entries(grouped).map(([id, v]) => {
             const rawRate = rateMap[id];
             const rate = (typeof rawRate === 'number' && !isNaN(rawRate)) ? rawRate : 50;
@@ -330,7 +338,7 @@ export default function Financeiro() {
                 orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at))
             };
         }).sort((a, b) => b.totalGerado - a.totalGerado);
-    }, [allClosedOrders, periodoComissao, proMapState, rateMap]);
+    }, [allClosedOrders, periodoComissao, proMapState, rateMap, clientMapState]);
 
     // ── Save expense ──
     async function handleSaveExpense() {
@@ -551,7 +559,7 @@ export default function Financeiro() {
                             type="month"
                             value={selectedMonth}
                             onChange={e => { setSelectedMonth(e.target.value); setCurrentPage(1); }}
-                            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer"
+                            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-red-600 transition-colors cursor-pointer"
                         />
                     </div>
                     <button
@@ -571,7 +579,7 @@ export default function Financeiro() {
                     {loading ? (
                         <div className="flex items-center justify-center py-32">
                             <div className="text-center">
-                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-3" />
+                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-3" />
                                 <p className="text-sm text-slate-500">Carregando financeiro...</p>
                             </div>
                         </div>
@@ -584,8 +592,8 @@ export default function Financeiro() {
                                 {/* Card 1: Saldo Hoje */}
                                 <div onClick={() => isCurrentMonth && openDetails('Faturamento Hoje', pedidosHoje, 'orders')} className={`bg-slate-800 rounded-2xl border border-slate-700 p-5 transition-all ${isCurrentMonth ? 'hover:border-slate-600 hover:ring-2 ring-slate-600 cursor-pointer' : 'opacity-50'}`}>
                                     <div className="flex items-center gap-3 mb-3">
-                                        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                                            <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(181,148,16,0.15)' }}>
+                                            <svg className="w-5 h-5" style={{ color: '#B59410' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
                                         </div>
@@ -596,11 +604,11 @@ export default function Financeiro() {
                                     </div>
                                     {isCurrentMonth ? (
                                         <>
-                                            <p className={`text-2xl font-bold ${saldoDia >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            <p className={`text-2xl font-bold ${saldoDia >= 0 ? '' : 'text-rose-400'}`} style={saldoDia >= 0 ? { color: '#B59410' } : {}}>
                                                 {saldoDia < 0 ? '- ' : ''}{formatBRL(Math.abs(saldoDia))}
                                             </p>
                                             <div className="flex gap-4 mt-2">
-                                                <span className="text-[11px] text-emerald-400/70">↑ {formatBRL(entradasHoje)}</span>
+                                                <span className="text-[11px] text-green-400/80">↑ {formatBRL(entradasHoje)}</span>
                                                 <span className="text-[11px] text-rose-400/70">↓ {formatBRL(saidasHoje)}</span>
                                             </div>
                                         </>
@@ -628,7 +636,7 @@ export default function Financeiro() {
                                                 {saldo7Dias < 0 ? '- ' : ''}{formatBRL(Math.abs(saldo7Dias))}
                                             </p>
                                             <div className="flex gap-4 mt-2">
-                                                <span className="text-[11px] text-emerald-400/70">↑ {formatBRL(entradas7Dias)}</span>
+                                                <span className="text-[11px] text-green-400/80">↑ {formatBRL(entradas7Dias)}</span>
                                                 <span className="text-[11px] text-rose-400/70">↓ {formatBRL(saidas7Dias)}</span>
                                             </div>
                                         </>
@@ -654,16 +662,16 @@ export default function Financeiro() {
                                         {saldoMes < 0 ? '- ' : ''}{formatBRL(Math.abs(saldoMes))}
                                     </p>
                                     <div className="flex gap-4 mt-2">
-                                        <span className="text-[11px] text-emerald-400/70">↑ {formatBRL(entradasMes)}</span>
+                                        <span className="text-[11px] text-green-400/80">↑ {formatBRL(entradasMes)}</span>
                                         <span className="text-[11px] text-rose-400/70">↓ {formatBRL(saidasMes)}</span>
                                     </div>
                                 </div>
 
                                 {/* Card 4: Assinantes */}
-                                <div onClick={() => openDetails('Assinantes', listaAssinantes, 'subscribers')} className="bg-slate-800 rounded-2xl border border-slate-700 p-5 hover:border-slate-600 hover:ring-2 ring-slate-600 transition-all cursor-pointer">
+                                <div onClick={() => openDetails('Assinantes', listaAssinantes, 'subscribers')} className="bg-slate-800 rounded-2xl border border-slate-700 p-5 hover:border-yellow-700 hover:ring-2 ring-yellow-700/40 transition-all cursor-pointer">
                                     <div className="flex items-center gap-3 mb-3">
-                                        <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center">
-                                            <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(181,148,16,0.15)' }}>
+                                            <svg className="w-5 h-5" style={{ color: '#B59410' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
                                             </svg>
                                         </div>
@@ -672,9 +680,9 @@ export default function Financeiro() {
                                             <p className="text-[10px] text-slate-600">Planos ativos</p>
                                         </div>
                                     </div>
-                                    <p className="text-2xl font-bold text-amber-400">{totalAssinantes}</p>
+                                    <p className="text-2xl font-bold" style={{ color: '#B59410' }}>{totalAssinantes}</p>
                                     <div className="flex gap-4 mt-2">
-                                        <span className="text-[11px] text-emerald-400/70">✓ {assinantesAtivos} Em dia</span>
+                                        <span className="text-[11px]" style={{ color: 'rgba(181,148,16,0.8)' }}>✓ {assinantesAtivos} Em dia</span>
                                         {assinantesAtrasados > 0 && (
                                             <span className="text-[11px] text-rose-400/70">⚠ {assinantesAtrasados} Atrasados</span>
                                         )}
@@ -729,7 +737,7 @@ export default function Financeiro() {
                                 {/* ── Comissões (Cofre) ── */}
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                                     <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                                         </svg>
                                         Comissões
@@ -763,7 +771,7 @@ export default function Financeiro() {
                                                     .map(p => (
                                                         <button key={p.k} onClick={() => setPeriodoComissao(p.k)}
                                                             className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${periodoComissao === p.k
-                                                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                                                ? 'bg-red-600/20 text-red-500 border border-red-600/30'
                                                                 : 'bg-slate-900/50 text-slate-500 border border-slate-700/30 hover:text-slate-300'
                                                                 }`}
                                                         >{isCurrentMonth ? p.l : 'Mês Selecionado'}</button>
@@ -783,19 +791,19 @@ export default function Financeiro() {
                                                             >
                                                                 <div className="flex items-center justify-between mb-2">
                                                                     <div className="flex items-center gap-2">
-                                                                        <svg className={`w-4 h-4 text-emerald-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                        <svg className={`w-4 h-4 text-red-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                                                                         </svg>
                                                                         <p className="text-sm font-semibold text-slate-200">{b.nome}</p>
                                                                     </div>
-                                                                    <button onClick={(e) => { e.stopPropagation(); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400/70 border border-emerald-500/20 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all">
+                                                                    <button onClick={(e) => { e.stopPropagation(); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-red-600/10 text-red-500/70 border border-red-600/20 hover:bg-red-600/20 hover:text-red-500 transition-all">
                                                                         ✓ Marcar como Pago
                                                                     </button>
                                                                 </div>
                                                                 <div className="flex items-center justify-between pl-6">
                                                                     <span className="text-[11px] text-slate-500">Produção Bruta: {formatBRL(b.totalGerado)}</span>
                                                                     <div className="flex items-center gap-1.5">
-                                                                        <span className="text-sm font-bold text-emerald-400">Comissão ({b.rate}%): {formatBRL(b.valorComissao)}</span>
+                                                                        <span className="text-sm font-bold" style={{ color: '#B59410' }}>Comissão ({b.rate}%): {formatBRL(b.valorComissao)}</span>
                                                                         <button onClick={(e) => { e.stopPropagation(); handleEditRate(b.id, b.nome); }} className="text-slate-500 hover:text-amber-400 transition-colors" title="Editar taxa">
                                                                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
@@ -814,8 +822,8 @@ export default function Financeiro() {
                                                                             Comandas ({(b.orders || []).length})
                                                                         </p>
                                                                         <div className="flex gap-2">
-                                                                            <button onClick={() => exportProfessionalExcel(b)} className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-emerald-500/50 text-slate-300 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition-all shadow-sm">
-                                                                                <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                                                                            <button onClick={() => exportProfessionalExcel(b)} className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-red-600/50 text-slate-300 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition-all shadow-sm">
+                                                                                <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
                                                                                 Excel
                                                                             </button>
                                                                             <button onClick={() => exportProfessionalPDF(b)} className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-rose-500/50 text-slate-300 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition-all shadow-sm">
@@ -834,7 +842,7 @@ export default function Financeiro() {
                                                                                         <th className="px-3 py-2.5 font-semibold">Cliente</th>
                                                                                         <th className="px-3 py-2.5 font-semibold min-w-[120px]">Serviços/Produtos</th>
                                                                                         <th className="px-3 py-2.5 font-semibold text-center">Pagamento</th>
-                                                                                        <th className="px-3 py-2.5 font-semibold text-right bg-emerald-500/10 text-emerald-400">Comissão ({b.rate}%)</th>
+                                                                                        <th className="px-3 py-2.5 font-semibold text-right" style={{ background: 'rgba(181,148,16,0.1)', color: '#B59410' }}>Comissão ({b.rate}%)</th>
                                                                                     </tr>
                                                                                 </thead>
                                                                                 <tbody className="divide-y divide-slate-700/50 bg-slate-900/60">
@@ -857,7 +865,7 @@ export default function Financeiro() {
                                                                                                         {payLabels[order.payment_method] || order.payment_method || '-'}
                                                                                                     </span>
                                                                                                 </td>
-                                                                                                <td className="px-3 py-2.5 text-right font-bold text-emerald-400">
+                                                                                                <td className="px-3 py-2.5 text-right font-bold" style={{ color: '#B59410' }}>
                                                                                                     {formatBRL(comVal)}
                                                                                                 </td>
                                                                                             </tr>
@@ -912,7 +920,7 @@ export default function Financeiro() {
                                     <div className="flex items-center gap-2">
                                         <button
                                             onClick={exportToExcel}
-                                            className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1.5"
+                                            className="px-3 py-1.5 bg-red-600/10 text-red-500 hover:bg-red-600/20 border border-red-600/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1.5"
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
@@ -923,7 +931,7 @@ export default function Financeiro() {
                                             onClick={exportToPDF}
                                             className="px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1.5"
                                         >
-                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <svg className="w-3.5 h-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                                             </svg>
                                             PDF
@@ -979,13 +987,13 @@ export default function Financeiro() {
                                                                     </span>
                                                                 </td>
                                                                 <td className="py-3 text-right">
-                                                                    <p className="text-emerald-400 font-bold">{formatBRL(h.valor)}</p>
+                                                                    <p className="font-bold" style={{ color: '#B59410' }}>{formatBRL(h.valor)}</p>
                                                                 </td>
                                                             </tr>
                                                             {isExpH && (
                                                                 <tr>
                                                                     <td colSpan={6} className="p-0">
-                                                                        <div className="bg-slate-900/50 border-l-2 border-emerald-500/30 px-5 py-3 mx-2 mb-2 rounded-lg">
+                                                                        <div className="bg-slate-900/50 border-l-2 border-red-600/30 px-5 py-3 mx-2 mb-2 rounded-lg">
                                                                             {items.length > 0 ? (
                                                                                 <div className="space-y-1.5">
                                                                                     {items.filter(it => it.item_type === 'service').length > 0 && (
@@ -1028,7 +1036,7 @@ export default function Financeiro() {
                                             <p className="text-xs text-slate-500">Mostrando {showingFrom} a {showingTo} de {historicoComandas.length} registros</p>
                                             <div className="flex gap-2">
                                                 <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 rounded-lg bg-slate-700/50 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">← Anterior</button>
-                                                <span className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-xs text-emerald-400 font-semibold">{currentPage} / {totalPages}</span>
+                                                <span className="px-3 py-1.5 rounded-lg bg-red-600/15 text-xs text-red-500 font-semibold">{currentPage} / {totalPages}</span>
                                                 <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1.5 rounded-lg bg-slate-700/50 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">Próximo →</button>
                                             </div>
                                         </div>
@@ -1071,12 +1079,12 @@ export default function Financeiro() {
                                     onKeyDown={e => e.key === 'Enter' && handleUnlock()}
                                     placeholder="••••••••"
                                     autoFocus
-                                    className={`w-full bg-slate-900 border rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-colors mb-4 ${isPasswordError ? 'border-red-500 focus:border-red-500' : 'border-slate-700 focus:border-emerald-500'}`}
+                                    className={`w-full bg-slate-900 border rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-colors mb-4 ${isPasswordError ? 'border-red-500 focus:border-red-500' : 'border-slate-700 focus:border-red-600'}`}
                                 />
                                 {isPasswordError && <p className="text-xs text-red-400 mb-3 -mt-2">Senha incorreta.</p>}
                                 <div className="flex gap-3">
                                     <button onClick={() => setIsPasswordModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl bg-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-600 transition-colors">Cancelar</button>
-                                    <button onClick={handleUnlock} className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 shadow-lg shadow-emerald-500/25 transition-all">Desbloquear</button>
+                                    <button onClick={handleUnlock} className="flex-1 px-4 py-3 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 shadow-lg shadow-red-600/25 transition-all">Desbloquear</button>
                                 </div>
                             </div>
                         </div>
@@ -1111,7 +1119,7 @@ export default function Financeiro() {
                                             onChange={e => setExpenseDesc(e.target.value)}
                                             placeholder="Ex: Conta de Luz, Café..."
                                             autoFocus
-                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 transition-colors"
                                         />
                                     </div>
                                     <div>
@@ -1124,7 +1132,7 @@ export default function Financeiro() {
                                             onChange={e => setExpenseAmount(e.target.value)}
                                             onKeyDown={e => e.key === 'Enter' && handleSaveExpense()}
                                             placeholder="0,00"
-                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 transition-colors"
                                         />
                                     </div>
                                 </div>
@@ -1187,10 +1195,10 @@ export default function Financeiro() {
                                                             <p className="text-[11px] text-slate-600">{formatDate(item.data)} {formatTime(item.data)}</p>
                                                         </div>
                                                     </div>
-                                                    <p className="text-sm font-bold text-emerald-400 ml-3 flex-shrink-0">{formatBRL(item.valor)}</p>
+                                                    <p className="text-sm font-bold text-red-500 ml-3 flex-shrink-0">{formatBRL(item.valor)}</p>
                                                 </div>
                                                 {isExpM && (
-                                                    <div className="bg-slate-900/50 border-l-2 border-emerald-500/30 px-5 py-3 mx-2 mb-1 rounded-lg mt-1">
+                                                    <div className="bg-slate-900/50 border-l-2 border-red-600/30 px-5 py-3 mx-2 mb-1 rounded-lg mt-1">
                                                         {items.length > 0 ? (
                                                             <div className="space-y-1.5">
                                                                 {items.filter(it => it.item_type === 'service').length > 0 && (
@@ -1228,11 +1236,11 @@ export default function Financeiro() {
                                     {detailsModalConfig.type === 'subscribers' && detailsModalConfig.data.map((item, i) => (
                                         <div key={item.id || i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/40 border border-slate-700/30">
                                             <p className="text-sm text-slate-200 font-medium truncate">{item.cliente}</p>
-                                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${item.status === 'active'
-                                                ? 'bg-emerald-500/15 text-emerald-400'
-                                                : 'bg-rose-500/15 text-rose-400'
-                                                }`}>
-                                                {item.status === 'active' ? '✓ Em dia' : '⚠ Atrasado'}
+                                            <span
+                                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${item.status !== 'active' ? 'bg-red-600 text-white' : ''}`}
+                                                style={item.status === 'active' ? { background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' } : {}}
+                                            >
+                                                {item.status === 'active' ? '★ Em dia' : '⚠ Atrasado'}
                                             </span>
                                         </div>
                                     ))}
@@ -1241,7 +1249,7 @@ export default function Financeiro() {
                                 {detailsModalConfig.type === 'orders' && detailsModalConfig.data.length > 0 && (
                                     <div className="mt-4 pt-4 border-t border-slate-700/50 flex items-center justify-between">
                                         <span className="text-xs text-slate-500">{detailsModalConfig.data.length} registro{detailsModalConfig.data.length !== 1 ? 's' : ''}</span>
-                                        <span className="text-sm font-bold text-emerald-400">
+                                        <span className="text-sm font-bold" style={{ color: '#B59410' }}>
                                             Total: {formatBRL(detailsModalConfig.data.reduce((s, o) => s + (o.valor || 0), 0))}
                                         </span>
                                     </div>
@@ -1250,7 +1258,7 @@ export default function Financeiro() {
                         </div>
                     )
                 }
-            </main >
-        </div >
+            </main>
+        </div>
     );
 }

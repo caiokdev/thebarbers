@@ -9,7 +9,7 @@ const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
 const ROW_HEIGHT = 56;
 const HEADER_HEIGHT = 72;
 const AVATAR_COLORS = [
-    'bg-emerald-500', 'bg-blue-500', 'bg-violet-500',
+    'bg-red-600', 'bg-blue-500', 'bg-violet-500',
     'bg-amber-500', 'bg-rose-500', 'bg-cyan-500',
     'bg-indigo-500', 'bg-pink-500',
 ];
@@ -51,7 +51,7 @@ const STATUS_CONFIG = {
     scheduled: { label: 'Agendado', bg: 'bg-blue-500/15', text: 'text-blue-400', border: 'border-blue-500/30' },
     confirmed: { label: 'Confirmado', bg: 'bg-cyan-500/15', text: 'text-cyan-400', border: 'border-cyan-500/30' },
     open: { label: 'Aberto', bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/30' },
-    completed: { label: 'Concluído', bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+    completed: { label: 'Concluído', bg: 'bg-red-600/15', text: 'text-red-500', border: 'border-red-600/30' },
     cancelled: { label: 'Cancelado', bg: 'bg-rose-500/15', text: 'text-rose-400', border: 'border-rose-500/30' },
     no_show: { label: 'Não Compareceu', bg: 'bg-slate-500/15', text: 'text-slate-400', border: 'border-slate-500/30' },
 };
@@ -125,7 +125,7 @@ export default function Agenda() {
                 const [barbersRes, clientsRes, productsRes] = await Promise.all([
                     supabase.from('professionals').select('id, name, specialty')
                         .eq('barbershop_id', shop.id).order('name'),
-                    supabase.from('clients').select('id, name, phone')
+                    supabase.from('clients').select('id, name, phone, is_subscriber, subscription_status')
                         .eq('barbershop_id', shop.id).order('name'),
                     supabase.from('products').select('id, name, price, current_stock')
                         .eq('barbershop_id', shop.id).order('name'),
@@ -264,6 +264,15 @@ export default function Agenda() {
         return m;
     }, [clients]);
 
+    // Subscriber status lookup: { [client_id]: 'active' | 'overdue' | null }
+    const subscriberMap = useMemo(() => {
+        const m = {};
+        clients.forEach(c => {
+            if (c.is_subscriber) m[c.id] = c.subscription_status || 'active';
+        });
+        return m;
+    }, [clients]);
+
     // Professional lookup
     const proMap = useMemo(() => {
         const m = {};
@@ -297,7 +306,7 @@ export default function Agenda() {
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                             </svg>
-                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 rounded-full"></span>
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-600 rounded-full"></span>
                         </button>
                     </div>
                 </header>
@@ -309,14 +318,14 @@ export default function Agenda() {
                             <button onClick={goPrev} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors" title="Dia anterior">
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
                             </button>
-                            <button onClick={goToday} className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isToday ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Hoje</button>
+                            <button onClick={goToday} className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isToday ? 'bg-red-600/15 text-red-500 border border-red-600/30' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Hoje</button>
                             <button onClick={goNext} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors" title="Próximo dia">
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                             </button>
                         </div>
                         <h2 className="text-base font-semibold text-slate-100 ml-2">{formatDateFull(selectedDate)}</h2>
                     </div>
-                    <button onClick={openModalEmpty} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20">
+                    <button onClick={openModalEmpty} className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-red-600/20">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                         Novo Agendamento
                     </button>
@@ -327,7 +336,7 @@ export default function Agenda() {
                     {loading ? (
                         <div className="flex items-center justify-center h-full">
                             <div className="text-center">
-                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                                <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
                                 <p className="text-slate-500 text-sm">Carregando agenda...</p>
                             </div>
                         </div>
@@ -382,7 +391,7 @@ export default function Agenda() {
                                                         onClick={(e) => {
                                                             appts.length === 0 && openModalFromCell(pro.id, time);
                                                         }}
-                                                        className={`min-h-[56px] border-r border-slate-700/30 relative transition-all duration-150 p-0.5 flex flex-col gap-1 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'} ${appts.length === 0 ? 'cursor-pointer group hover:bg-emerald-500/5 hover:border-emerald-500/20' : ''}`}
+                                                        className={`min-h-[56px] border-r border-slate-700/30 relative transition-all duration-150 p-0.5 flex flex-col gap-1 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'} ${appts.length === 0 ? 'cursor-pointer group hover:bg-emerald-500/5 hover:border-red-600/20' : ''}`}
                                                     >
                                                         {appts.length > 0 ? (
                                                             appts.map((appt, i) => (
@@ -395,18 +404,26 @@ export default function Agenda() {
                                                                         : `${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'bg-')}/15 border ${AVATAR_COLORS[colIdx % AVATAR_COLORS.length].replace('bg-', 'border-')}/30 ring-emerald-400`
                                                                         }`}>
                                                                     <p className={`text-xs font-semibold truncate ${appt.status === 'no_show' ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{clientMap[appt.client_id] || 'Cliente'}</p>
-                                                                    <div className="flex items-center gap-1">
+                                                                    <div className="flex items-center justify-between gap-1">
                                                                         <p className={`text-[10px] truncate ${appt.status === 'no_show' ? 'text-slate-600 line-through' : 'text-slate-400'}`}>{formatCurrency(appt.total_amount)}</p>
-                                                                        {appt.status === 'no_show' && (
-                                                                            <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>
-                                                                        )}
+                                                                        <div className="flex items-center gap-1 flex-shrink-0">
+                                                                            {appt.status === 'no_show' && (
+                                                                                <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>
+                                                                            )}
+                                                                            {appt.status !== 'no_show' && subscriberMap[appt.client_id] === 'overdue' && (
+                                                                                <span className="text-[8px] font-bold text-white bg-red-600 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">⚠ Atr</span>
+                                                                            )}
+                                                                            {appt.status !== 'no_show' && subscriberMap[appt.client_id] && subscriberMap[appt.client_id] !== 'overdue' && (
+                                                                                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none" style={{ background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' }}>★</span>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
                                                                 </div>
                                                             ))
                                                         ) : (
                                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <div className="w-6 h-6 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                                                                    <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                                                                <div className="w-6 h-6 rounded-full bg-red-600/10 border border-red-600/20 flex items-center justify-center">
+                                                                    <svg className="w-3 h-3 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                                                                 </div>
                                                             </div>
                                                         )}
@@ -421,8 +438,8 @@ export default function Agenda() {
                             {/* Now Line */}
                             {isToday && nowLineTop !== null && (
                                 <div className="absolute left-[72px] right-0 z-30 pointer-events-none" style={{ top: `${nowLineTop}px` }}>
-                                    <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                                    <div className="h-[2px] bg-emerald-500 w-full shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
+                                    <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-600 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                                    <div className="h-[2px] bg-red-600 w-full shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
                                 </div>
                             )}
                         </div>
@@ -721,8 +738,8 @@ function AppointmentModal({
                 {/* Title */}
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-emerald-500/15 rounded-xl flex items-center justify-center">
-                            <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                        <div className="w-10 h-10 bg-red-600/15 rounded-xl flex items-center justify-center">
+                            <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                         </div>
                         <div>
                             <h3 className="text-lg font-bold text-slate-100">Novo Agendamento</h3>
@@ -738,7 +755,7 @@ function AppointmentModal({
                     {/* Professional */}
                     <div>
                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Profissional *</label>
-                        <select value={professionalId} onChange={e => setProfessionalId(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer">
+                        <select value={professionalId} onChange={e => setProfessionalId(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors appearance-none cursor-pointer">
                             <option value="">Selecione o barbeiro</option>
                             {professionals.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
@@ -748,11 +765,11 @@ function AppointmentModal({
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Data *</label>
-                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Horário *</label>
-                            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors" />
+                            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                         </div>
                     </div>
 
@@ -765,10 +782,10 @@ function AppointmentModal({
                             onChange={e => { setClientSearch(e.target.value); setClientId(''); setShowClientDropdown(true); }}
                             onFocus={() => setShowClientDropdown(true)}
                             placeholder="Buscar cliente..."
-                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                         />
                         {clientId && (
-                            <div className="absolute right-3 top-9 text-xs text-emerald-400">✓</div>
+                            <div className="absolute right-3 top-9 text-xs text-red-500">✓</div>
                         )}
                         {showClientDropdown && filteredClients.length > 0 && !clientId && (
                             <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl shadow-black/40 max-h-48 overflow-y-auto">
@@ -784,7 +801,7 @@ function AppointmentModal({
                     {/* Origin */}
                     <div>
                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Origem do Agendamento</label>
-                        <select value={origin} onChange={e => setOrigin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer">
+                        <select value={origin} onChange={e => setOrigin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors appearance-none cursor-pointer">
                             <option value="reception">Recepção</option>
                             <option value="app">Aplicativo</option>
                             <option value="whatsapp">WhatsApp</option>
@@ -797,7 +814,7 @@ function AppointmentModal({
                         <button
                             type="button"
                             onClick={() => setIsAvulso(!isAvulso)}
-                            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${isAvulso ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${isAvulso ? 'bg-red-600' : 'bg-slate-600'}`}
                         >
                             <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${isAvulso ? 'translate-x-5' : 'translate-x-0'}`} />
                         </button>
@@ -816,7 +833,7 @@ function AppointmentModal({
                                     value={avulsoValue}
                                     onChange={e => setAvulsoValue(e.target.value)}
                                     placeholder="0,00"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                 />
                             </div>
                             <div>
@@ -826,7 +843,7 @@ function AppointmentModal({
                                     onChange={e => setAvulsoNotes(e.target.value)}
                                     placeholder="Ex: Corte + algo a decidir..."
                                     rows={2}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors resize-none"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors resize-none"
                                 />
                             </div>
                         </div>
@@ -838,7 +855,7 @@ function AppointmentModal({
                                 <select
                                     value={catalogSelect}
                                     onChange={e => addToCart(e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors appearance-none cursor-pointer"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors appearance-none cursor-pointer"
                                 >
                                     <option value="">Adicionar serviço ou produto...</option>
                                     {catalog.filter(c => c.type === 'service').length > 0 && (
@@ -898,7 +915,7 @@ function AppointmentModal({
                     {/* ── Total ── */}
                     <div className="flex items-center justify-between pt-2">
                         <p className="text-sm text-slate-400">Total</p>
-                        <p className="text-lg font-bold text-emerald-400">{formatCurrency(totalAmount)}</p>
+                        <p className="text-lg font-bold text-red-500">{formatCurrency(totalAmount)}</p>
                     </div>
                 </div>
 
@@ -907,7 +924,7 @@ function AppointmentModal({
                     <button onClick={onClose} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors disabled:opacity-50">
                         Cancelar
                     </button>
-                    <button onClick={handleSave} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                    <button onClick={handleSave} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
                         {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                         {saving ? 'Salvando...' : 'Salvar Agendamento'}
                     </button>
@@ -965,8 +982,8 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCanc
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-emerald-500/15 rounded-xl flex items-center justify-center">
-                            <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <div className="w-12 h-12 bg-red-600/15 rounded-xl flex items-center justify-center">
+                            <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                         </div>
@@ -1001,7 +1018,7 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCanc
                     </div>
                     <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
                         <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Valor</p>
-                        <p className="text-sm font-bold text-emerald-400">{formatCurrency(order.total_amount)}</p>
+                        <p className="text-sm font-bold text-red-500">{formatCurrency(order.total_amount)}</p>
                     </div>
                 </div>
 
@@ -1039,7 +1056,7 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCanc
                                 disabled={actionLoading || order.status === 'open'}
                                 className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${order.status === 'open'
                                     ? 'text-amber-300 bg-amber-500/10 border border-amber-500/20 cursor-not-allowed opacity-70'
-                                    : 'text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 disabled:opacity-50'
+                                    : 'text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50'
                                     }`}
                             >
                                 {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (

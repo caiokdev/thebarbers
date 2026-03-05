@@ -27,6 +27,8 @@ export default function Estoque() {
     // ── Product Modal ──
     const [editingProduct, setEditingProduct] = useState(null);
     const [editRepurchaseDays, setEditRepurchaseDays] = useState(30);
+    const [editCurrentStock, setEditCurrentStock] = useState(0);
+    const [editMinStock, setEditMinStock] = useState(0);
     const [savingProduct, setSavingProduct] = useState(false);
 
     // ── New Product Modal ──
@@ -191,6 +193,8 @@ export default function Estoque() {
     const openEditModal = (product) => {
         setEditingProduct(product);
         setEditRepurchaseDays(product.repurchase_days || 30);
+        setEditCurrentStock(product.current_stock || 0);
+        setEditMinStock(product.min_stock || 0);
     };
 
     const handleSaveProduct = async () => {
@@ -199,7 +203,11 @@ export default function Estoque() {
         try {
             const { error } = await supabase
                 .from('products')
-                .update({ repurchase_days: editRepurchaseDays })
+                .update({
+                    repurchase_days: editRepurchaseDays,
+                    current_stock: editCurrentStock,
+                    min_stock: editMinStock
+                })
                 .eq('id', editingProduct.id);
             if (error) throw error;
             setEditingProduct(null);
@@ -256,7 +264,7 @@ export default function Estoque() {
                 <Sidebar />
                 <main className="flex-1 flex items-center justify-center">
                     <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
                         <p className="text-slate-500 text-sm">Carregando estoque...</p>
                     </div>
                 </main>
@@ -283,12 +291,12 @@ export default function Estoque() {
                                 type="month"
                                 value={selectedPeriod}
                                 onChange={(e) => setSelectedPeriod(e.target.value)}
-                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors [color-scheme:dark]"
+                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors [color-scheme:dark]"
                             />
                         </div>
                         <button
                             onClick={() => setShowNewProductModal(true)}
-                            className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-emerald-500/20"
+                            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-red-600/20"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                             Novo Produto
@@ -342,7 +350,7 @@ export default function Estoque() {
                         {/* Top Products */}
                         <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                             <h2 className="text-sm font-semibold text-slate-100 mb-1 flex items-center gap-2">
-                                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0016.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228m0 0a6.003 6.003 0 01-2.48-.228M7.73 9.728a6.008 6.008 0 002.48.228m0 0c.855 0 1.683-.115 2.48-.228" />
                                 </svg>
                                 Produtos Mais Vendidos
@@ -368,7 +376,7 @@ export default function Estoque() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center justify-between mb-1">
                                                         <span className="text-sm text-slate-300 font-medium truncate">{p.nome}</span>
-                                                        <span className="text-xs font-bold text-emerald-400 flex-shrink-0 ml-2">{p.qtd} un.</span>
+                                                        <span className="text-xs font-bold text-red-500 flex-shrink-0 ml-2">{p.qtd} un.</span>
                                                     </div>
                                                     <div className="w-full bg-slate-900 rounded-full h-2">
                                                         <div
@@ -414,7 +422,7 @@ export default function Estoque() {
                                                     href={r.whatsapp}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 hover:bg-emerald-500/30 transition-all flex-shrink-0 ml-3"
+                                                    className="w-9 h-9 rounded-xl bg-red-600/15 flex items-center justify-center text-red-500 hover:bg-emerald-500/30 transition-all flex-shrink-0 ml-3"
                                                     onClick={e => e.stopPropagation()}
                                                     title="Enviar WhatsApp"
                                                 >
@@ -441,13 +449,13 @@ export default function Estoque() {
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 placeholder="Pesquisar produtos..."
-                                className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all"
+                                className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50 focus:ring-1 focus:ring-red-600/30 transition-all"
                             />
                         </div>
                         <select
                             value={statusFilter}
                             onChange={(e) => setStatusFilter(e.target.value)}
-                            className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all appearance-none cursor-pointer min-w-[140px]"
+                            className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-red-600/50 focus:ring-1 focus:ring-red-600/30 transition-all appearance-none cursor-pointer min-w-[140px]"
                         >
                             <option value="all">Todos</option>
                             <option value="ok">✅ OK</option>
@@ -487,7 +495,7 @@ export default function Estoque() {
                                                         <div className="flex items-center gap-3">
                                                             <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${isCritical ? 'bg-rose-500/15 text-rose-400'
                                                                 : isLow ? 'bg-amber-500/15 text-amber-400'
-                                                                    : 'bg-emerald-500/15 text-emerald-400'
+                                                                    : 'bg-red-600/15 text-red-500'
                                                                 }`}>
                                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -513,7 +521,7 @@ export default function Estoque() {
                                                                 Baixo
                                                             </span>
                                                         ) : (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
+                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-red-600/10 text-red-500 ring-1 ring-inset ring-red-600/20">
                                                                 OK
                                                             </span>
                                                         )}
@@ -538,8 +546,8 @@ export default function Estoque() {
                     <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl shadow-black/40 mx-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-6">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-emerald-500/15 rounded-xl flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <div className="w-10 h-10 bg-red-600/15 rounded-xl flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                                     </svg>
                                 </div>
@@ -555,14 +563,31 @@ export default function Estoque() {
 
                         <div className="space-y-4">
                             {/* Read-only info */}
+                            <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50 mb-2">
+                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Preço</p>
+                                <p className="text-sm font-bold text-red-500">{formatBRL(editingProduct.price)}</p>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-3">
-                                <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
-                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Estoque Atual</p>
-                                    <p className="text-sm font-bold text-slate-100">{editingProduct.current_stock}</p>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Estoque Atual</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={editCurrentStock}
+                                        onChange={e => setEditCurrentStock(parseInt(e.target.value) || 0)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
+                                    />
                                 </div>
-                                <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
-                                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Preço</p>
-                                    <p className="text-sm font-bold text-emerald-400">{formatBRL(editingProduct.price)}</p>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Estoque Mínimo</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={editMinStock}
+                                        onChange={e => setEditMinStock(parseInt(e.target.value) || 0)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
+                                    />
                                 </div>
                             </div>
 
@@ -576,7 +601,7 @@ export default function Estoque() {
                                     max="365"
                                     value={editRepurchaseDays}
                                     onChange={e => setEditRepurchaseDays(parseInt(e.target.value) || 30)}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                 />
                             </div>
                         </div>
@@ -585,7 +610,7 @@ export default function Estoque() {
                             <button onClick={() => setEditingProduct(null)} disabled={savingProduct} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors disabled:opacity-50">
                                 Cancelar
                             </button>
-                            <button onClick={handleSaveProduct} disabled={savingProduct} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                            <button onClick={handleSaveProduct} disabled={savingProduct} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
                                 {savingProduct && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                                 {savingProduct ? 'Salvando...' : 'Salvar'}
                             </button>
@@ -601,8 +626,8 @@ export default function Estoque() {
                     <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl shadow-black/40 mx-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-6">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-emerald-500/15 rounded-xl flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <div className="w-10 h-10 bg-red-600/15 rounded-xl flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                                     </svg>
                                 </div>
@@ -624,7 +649,7 @@ export default function Estoque() {
                                     value={newProduct.name}
                                     onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))}
                                     placeholder="Ex: Pomada Modeladora"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                 />
                             </div>
 
@@ -637,7 +662,7 @@ export default function Estoque() {
                                     value={newProduct.price}
                                     onChange={e => setNewProduct(p => ({ ...p, price: e.target.value }))}
                                     placeholder="0,00"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                 />
                             </div>
 
@@ -650,7 +675,7 @@ export default function Estoque() {
                                         value={newProduct.current_stock}
                                         onChange={e => setNewProduct(p => ({ ...p, current_stock: e.target.value }))}
                                         placeholder="0"
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                     />
                                 </div>
                                 <div>
@@ -661,7 +686,7 @@ export default function Estoque() {
                                         value={newProduct.min_stock}
                                         onChange={e => setNewProduct(p => ({ ...p, min_stock: e.target.value }))}
                                         placeholder="0"
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                     />
                                 </div>
                             </div>
@@ -675,7 +700,7 @@ export default function Estoque() {
                                     max="365"
                                     value={newProduct.repurchase_days}
                                     onChange={e => setNewProduct(p => ({ ...p, repurchase_days: e.target.value }))}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                 />
                             </div>
                         </div>
@@ -684,7 +709,7 @@ export default function Estoque() {
                             <button onClick={() => setShowNewProductModal(false)} disabled={savingNewProduct} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors disabled:opacity-50">
                                 Cancelar
                             </button>
-                            <button onClick={handleCreateProduct} disabled={savingNewProduct} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                            <button onClick={handleCreateProduct} disabled={savingNewProduct} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
                                 {savingNewProduct && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                                 {savingNewProduct ? 'Salvando...' : 'Cadastrar Produto'}
                             </button>

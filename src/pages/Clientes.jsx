@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // ── Helpers ──
 const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -249,6 +252,77 @@ export default function Clientes() {
         }
     };
 
+    // ── Excel Export ──
+    const exportToExcel = () => {
+        if (!filteredClientes || filteredClientes.length === 0) {
+            alert('Não há clientes para exportar com os filtros atuais.');
+            return;
+        }
+
+        const dataToExport = filteredClientes.map(c => ({
+            'Nome': c.nome,
+            'Contato': c.telefone,
+            'Status': c.isSubscriber ? (c.subscriptionStatus === 'overdue' ? 'Atrasado' : 'Assinante') : 'Avulso',
+            'Última Visita': c.ultimaVisita
+                ? `${String(c.ultimaVisita.getDate()).padStart(2, '0')}/${String(c.ultimaVisita.getMonth() + 1).padStart(2, '0')}/${c.ultimaVisita.getFullYear()}`
+                : '—',
+            'Total Gasto (R$)': c.totalGasto.toFixed(2).replace('.', ',')
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(dataToExport);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Clientes");
+        XLSX.writeFile(wb, `Lista_Clientes_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+
+    // ── PDF Export ──
+    const exportToPDF = () => {
+        if (!filteredClientes || filteredClientes.length === 0) {
+            alert('Não há clientes para exportar com os filtros atuais.');
+            return;
+        }
+
+        const doc = new jsPDF();
+
+        doc.setFontSize(18);
+        doc.text(`Relatório de Clientes`, 14, 22);
+
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
+        doc.text(`Total de Clientes no relatório: ${filteredClientes.length}`, 14, 36);
+
+        const tableColumn = ["Nome", "Contato", "Status", "Última Visita", "Total Gasto"];
+        const tableRows = [];
+
+        filteredClientes.forEach(c => {
+            const status = c.isSubscriber ? (c.subscriptionStatus === 'overdue' ? 'Atrasado' : 'Assinante') : 'Avulso';
+            const ultimaVisita = c.ultimaVisita
+                ? `${String(c.ultimaVisita.getDate()).padStart(2, '0')}/${String(c.ultimaVisita.getMonth() + 1).padStart(2, '0')}/${c.ultimaVisita.getFullYear()}`
+                : '—';
+
+            const rowData = [
+                c.nome,
+                c.telefone,
+                status,
+                ultimaVisita,
+                formatBRL(c.totalGasto)
+            ];
+            tableRows.push(rowData);
+        });
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 44,
+            theme: 'striped',
+            headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+            alternateRowStyles: { fillColor: [241, 245, 249] },
+        });
+
+        doc.save(`Lista_Clientes_${new Date().toISOString().slice(0, 10)}.pdf`);
+    };
+
     // ── Render ──
     if (loading && clientesLista.length === 0) {
         return (
@@ -256,7 +330,7 @@ export default function Clientes() {
                 <Sidebar />
                 <main className="flex-1 flex items-center justify-center">
                     <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
                         <p className="text-slate-500 text-sm">Carregando clientes...</p>
                     </div>
                 </main>
@@ -277,7 +351,7 @@ export default function Clientes() {
                     </div>
                     <button
                         onClick={() => setNewClientModal(true)}
-                        className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-500/20"
+                        className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-red-600/20"
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -303,64 +377,88 @@ export default function Clientes() {
                             <p className="text-3xl font-bold text-slate-100">{totalClientes}</p>
                         </div>
                         {/* Assinantes */}
-                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
+                        <div className="bg-slate-800 rounded-2xl p-5" style={{ border: '1px solid rgba(181,148,16,0.3)' }}>
                             <div className="flex items-center gap-3 mb-2">
-                                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(181,148,16,0.12)' }}>
+                                    <svg className="w-5 h-5" style={{ color: '#B59410' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
                                     </svg>
                                 </div>
                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Assinantes</p>
                             </div>
-                            <p className="text-3xl font-bold text-emerald-400">{totalAssinantes}</p>
+                            <p className="text-3xl font-bold" style={{ color: '#B59410' }}>{totalAssinantes}</p>
                             <p className="text-[10px] text-slate-600 mt-1">{totalClientes > 0 ? ((totalAssinantes / totalClientes) * 100).toFixed(0) : 0}% da base</p>
                         </div>
                         {/* Novos este mês */}
                         <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
                             <div className="flex items-center gap-3 mb-2">
-                                <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM3 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 019.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
                                     </svg>
                                 </div>
                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Novos este mês</p>
                             </div>
-                            <p className="text-3xl font-bold text-amber-400">{novosEsteMes}</p>
+                            <p className="text-3xl font-bold text-emerald-400">{novosEsteMes}</p>
                         </div>
                     </div>
 
                     {/* ══════════ LINHA 2 — Filtros + Search ══════════ */}
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                        {/* Filter Pills */}
-                        <div className="flex items-center gap-1.5 bg-slate-800 rounded-xl border border-slate-700 p-1">
-                            {[
-                                { key: 'all', label: 'Todos' },
-                                { key: 'active', label: 'Em Dia' },
-                                { key: 'overdue', label: 'Atrasados' },
-                                { key: 'avulso', label: 'Avulsos' },
-                            ].map(f => (
-                                <button
-                                    key={f.key}
-                                    onClick={() => setStatusFilter(f.key)}
-                                    className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ${statusFilter === f.key
-                                        ? f.key === 'overdue'
-                                            ? 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30 shadow-sm'
-                                            : f.key === 'active'
-                                                ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30 shadow-sm'
-                                                : 'bg-slate-700 text-slate-200 ring-1 ring-slate-600 shadow-sm'
-                                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50'
-                                        }`}
-                                >
-                                    {f.label}
-                                    {f.key !== 'all' && (
-                                        <span className="ml-1.5 text-[10px] opacity-70">
-                                            {f.key === 'active' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'active').length
-                                                : f.key === 'overdue' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'overdue').length
-                                                    : clientesLista.filter(c => !c.isSubscriber).length}
-                                        </span>
-                                    )}
-                                </button>
-                            ))}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full">
+                            {/* Filter Pills */}
+                            <div className="flex flex-wrap items-center gap-1.5 bg-slate-800 rounded-xl border border-slate-700 p-1">
+                                {[
+                                    { key: 'all', label: 'Todos' },
+                                    { key: 'active', label: 'Em Dia' },
+                                    { key: 'overdue', label: 'Atrasados' },
+                                    { key: 'avulso', label: 'Avulsos' },
+                                ].map(f => (
+                                    <button
+                                        key={f.key}
+                                        onClick={() => setStatusFilter(f.key)}
+                                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ${statusFilter === f.key
+                                            ? f.key === 'overdue'
+                                                ? 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30 shadow-sm'
+                                                : f.key === 'active'
+                                                    ? 'bg-red-600/20 text-red-500 ring-1 ring-red-600/30 shadow-sm'
+                                                    : 'bg-slate-700 text-slate-200 ring-1 ring-slate-600 shadow-sm'
+                                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50'
+                                            }`}
+                                    >
+                                        {f.label}
+                                        {f.key !== 'all' && (
+                                            <span className="ml-1.5 text-[10px] opacity-70">
+                                                {f.key === 'active' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'active').length
+                                                    : f.key === 'overdue' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'overdue').length
+                                                        : clientesLista.filter(c => !c.isSubscriber).length}
+                                            </span>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* ── Export Buttons ── */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                                onClick={exportToExcel}
+                                className="px-3 py-2 bg-red-600/10 text-red-500 hover:bg-red-600/20 border border-red-600/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                                Excel
+                            </button>
+                            <button
+                                onClick={exportToPDF}
+                                className="px-3 py-2 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                                PDF
+                            </button>
                         </div>
                     </div>
 
@@ -374,7 +472,7 @@ export default function Clientes() {
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             placeholder="Pesquisar por nome ou telefone..."
-                            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all"
+                            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50 focus:ring-1 focus:ring-red-600/30 transition-all"
                         />
                     </div>
 
@@ -417,16 +515,16 @@ export default function Clientes() {
                                                 <td className="px-6 py-4">
                                                     {c.isSubscriber ? (
                                                         c.subscriptionStatus === 'overdue' ? (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-500/10 text-rose-400 ring-1 ring-inset ring-rose-500/20">
-                                                                Atrasado
+                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-600 text-white ring-1 ring-red-500">
+                                                                ⚠ Atrasado
                                                             </span>
                                                         ) : (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
-                                                                Assinante
+                                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold" style={{ background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' }}>
+                                                                ★ Assinante
                                                             </span>
                                                         )
                                                     ) : (
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-500/10 text-slate-400 ring-1 ring-inset ring-slate-500/20">
+                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-700 text-slate-300 ring-1 ring-inset ring-slate-600">
                                                             Avulso
                                                         </span>
                                                     )}
@@ -471,7 +569,7 @@ export default function Clientes() {
                                     value={newName}
                                     onChange={e => setNewName(e.target.value)}
                                     placeholder="Nome completo"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
                                 />
                             </div>
                             <div>
@@ -481,11 +579,11 @@ export default function Clientes() {
                                     value={newPhone}
                                     onChange={e => setNewPhone(e.target.value)}
                                     placeholder="(00) 00000-0000"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
                                 />
                             </div>
                             <label className="flex items-center gap-3 cursor-pointer group">
-                                <div className={`w-10 h-6 rounded-full transition-colors flex items-center ${newIsSub ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                                <div className={`w-10 h-6 rounded-full transition-colors flex items-center ${newIsSub ? 'bg-red-600' : 'bg-slate-700'}`}>
                                     <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${newIsSub ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </div>
                                 <span className="text-sm text-slate-300 group-hover:text-slate-200">Assinante do clube</span>
@@ -500,7 +598,7 @@ export default function Clientes() {
                             <button
                                 onClick={handleSaveClient}
                                 disabled={saving}
-                                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+                                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
                             >
                                 {saving ? 'Salvando...' : 'Salvar Cliente'}
                             </button>
@@ -525,7 +623,7 @@ export default function Clientes() {
                                         <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
                                             {profileModal.client?.nome}
                                             {profileModal.client?.isSubscriber && (
-                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-600/15 text-red-500 border border-red-600/30">
                                                     Assinante
                                                 </span>
                                             )}
@@ -542,7 +640,7 @@ export default function Clientes() {
                             {/* Subscription toggle */}
                             <div className="mt-4 flex items-center justify-between bg-slate-900/50 rounded-xl px-4 py-3 border border-slate-700/50">
                                 <div className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                                     </svg>
                                     <span className="text-sm font-medium text-slate-300">Clube de Assinatura</span>
@@ -551,7 +649,7 @@ export default function Clientes() {
                                     onClick={() => toggleSubscription(profileModal.client?.id, profileModal.client?.isSubscriber)}
                                     className="relative"
                                 >
-                                    <div className={`w-12 h-7 rounded-full transition-colors flex items-center ${profileModal.client?.isSubscriber ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                                    <div className={`w-12 h-7 rounded-full transition-colors flex items-center ${profileModal.client?.isSubscriber ? 'bg-red-600' : 'bg-slate-700'}`}>
                                         <div className={`w-5 h-5 bg-white rounded-full shadow-md transition-transform mx-1 ${profileModal.client?.isSubscriber ? 'translate-x-5' : 'translate-x-0'}`} />
                                     </div>
                                 </button>
@@ -562,12 +660,12 @@ export default function Clientes() {
                                     <button
                                         onClick={() => handleTogglePaymentStatus(profileModal.client?.id, profileModal.client?.subscriptionStatus)}
                                         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${profileModal.client?.subscriptionStatus === 'active'
-                                            ? 'bg-emerald-500/10 border-emerald-500/25 hover:bg-emerald-500/20'
+                                            ? 'bg-red-600/10 border-emerald-500/25 hover:bg-red-600/20'
                                             : 'bg-rose-500/10 border-rose-500/25 hover:bg-rose-500/20'
                                             }`}
                                     >
                                         <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-semibold ${profileModal.client?.subscriptionStatus === 'active' ? 'text-emerald-400' : 'text-rose-400'
+                                            <span className={`text-sm font-semibold ${profileModal.client?.subscriptionStatus === 'active' ? 'text-red-500' : 'text-rose-400'
                                                 }`}>
                                                 {profileModal.client?.subscriptionStatus === 'active' ? '✓ Em dia' : '⚠️ Atrasado'}
                                             </span>
@@ -581,7 +679,7 @@ export default function Clientes() {
                             {/* Financial summary */}
                             <div className="mt-3 bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Total deixado na barbearia</p>
-                                <p className="text-2xl font-bold text-emerald-400">{formatBRL(profileModal.client?.totalGasto)}</p>
+                                <p className="text-2xl font-bold text-red-500">{formatBRL(profileModal.client?.totalGasto)}</p>
                             </div>
                         </div>
                         {/* Orders list */}
@@ -589,7 +687,7 @@ export default function Clientes() {
                             <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Últimas Comandas</h4>
                             {profileLoading ? (
                                 <div className="text-center py-8">
-                                    <div className="inline-block w-6 h-6 border-2 border-slate-700 border-t-emerald-500 rounded-full animate-spin"></div>
+                                    <div className="inline-block w-6 h-6 border-2 border-slate-700 border-t-red-600 rounded-full animate-spin"></div>
                                 </div>
                             ) : profileModal.orders.length > 0 ? (
                                 <div className="space-y-2">
@@ -599,7 +697,7 @@ export default function Clientes() {
                                                 <p className="text-sm font-medium text-slate-200">{o.data} <span className="text-slate-600 text-xs ml-1">{o.hora}</span></p>
                                                 <p className="text-[11px] text-slate-500">{o.barbeiro} • {o.pagamento}</p>
                                             </div>
-                                            <p className="text-sm font-bold text-emerald-400">{formatBRL(o.valor)}</p>
+                                            <p className="text-sm font-bold text-red-500">{formatBRL(o.valor)}</p>
                                         </div>
                                     ))}
                                 </div>

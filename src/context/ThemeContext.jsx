@@ -2,6 +2,21 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 
 const THEME_COLORS = {
+    rose: {
+        primary: 'rose',
+        bg: 'bg-rose-600',
+        bgHover: 'hover:bg-rose-700',
+        bgLight: 'bg-rose-600/15',
+        text: 'text-rose-500',
+        textDark: 'text-rose-600',
+        border: 'border-rose-600',
+        borderLight: 'border-rose-600/30',
+        shadow: 'shadow-rose-600/20',
+        ring: 'ring-rose-600/30',
+        focusBorder: 'focus:border-rose-600',
+        focusRing: 'focus:ring-rose-600/30',
+        borderTop: 'border-t-rose-600',
+    },
     emerald: {
         primary: 'emerald',
         bg: 'bg-emerald-500',
@@ -62,21 +77,6 @@ const THEME_COLORS = {
         focusRing: 'focus:ring-amber-500/30',
         borderTop: 'border-t-amber-500',
     },
-    rose: {
-        primary: 'rose',
-        bg: 'bg-rose-500',
-        bgHover: 'hover:bg-rose-600',
-        bgLight: 'bg-rose-500/15',
-        text: 'text-rose-400',
-        textDark: 'text-rose-500',
-        border: 'border-rose-500',
-        borderLight: 'border-rose-500/30',
-        shadow: 'shadow-rose-500/20',
-        ring: 'ring-rose-500/30',
-        focusBorder: 'focus:border-rose-500',
-        focusRing: 'focus:ring-rose-500/30',
-        borderTop: 'border-t-rose-500',
-    },
     cyan: {
         primary: 'cyan',
         bg: 'bg-cyan-500',
@@ -97,7 +97,7 @@ const THEME_COLORS = {
 const ThemeContext = createContext(null);
 
 export function ThemeProvider({ children }) {
-    const [themeColor, setThemeColor] = useState('emerald');
+    const [themeColor, setThemeColor] = useState('rose'); // Default: The Barbers brand red
 
     useEffect(() => {
         async function loadTheme() {
@@ -111,7 +111,7 @@ export function ThemeProvider({ children }) {
                     setThemeColor(shop.theme_color);
                 }
             } catch (_) {
-                // theme_color column may not exist yet — fallback to emerald
+                // theme_color column may not exist yet — fallback to rose
             }
         }
         loadTheme();
@@ -129,7 +129,7 @@ export function ThemeProvider({ children }) {
         return () => { supabase.removeChannel(channel); };
     }, []);
 
-    const theme = THEME_COLORS[themeColor] || THEME_COLORS.emerald;
+    const theme = THEME_COLORS[themeColor] || THEME_COLORS.rose;
 
     const updateThemeColor = async (color, barbershopId) => {
         if (!THEME_COLORS[color]) return;
@@ -154,10 +154,9 @@ export function ThemeProvider({ children }) {
 export function useTheme() {
     const ctx = useContext(ThemeContext);
     if (!ctx) {
-        // Fallback if used outside provider
         return {
-            theme: THEME_COLORS.emerald,
-            themeColor: 'emerald',
+            theme: THEME_COLORS.rose,
+            themeColor: 'rose',
             updateThemeColor: () => { },
             THEME_COLORS,
         };

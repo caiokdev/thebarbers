@@ -73,12 +73,12 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
                                 <td className="px-3 py-2.5 text-slate-300">{dataStr}</td>
                                 <td className="px-3 py-2.5 text-slate-300">{o.clienteNome || clientMap[o.client_id] || 'Cliente avulso'}</td>
                                 {showBarbeiro && <td className="px-3 py-2.5 text-slate-300">{proMap[o.professional_id] || 'Sem nome'}</td>}
-                                <td className="px-3 py-2.5 text-right font-semibold text-emerald-400">{formatBRL(parseFloat(o.total_amount || 0))}</td>
+                                <td className="px-3 py-2.5 text-right font-semibold text-red-500">{formatBRL(parseFloat(o.total_amount || 0))}</td>
                             </tr>
                             {isExpanded && (
                                 <tr>
                                     <td colSpan={showBarbeiro ? 5 : 4} className="p-0">
-                                        <div className="bg-slate-900/50 border-l-2 border-emerald-500/30 px-5 py-3 mx-2 mb-2 rounded-lg">
+                                        <div className="bg-slate-900/50 border-l-2 border-red-600/30 px-5 py-3 mx-2 mb-2 rounded-lg">
                                             {hasItems ? (
                                                 <div className="space-y-1.5">
                                                     {items.filter(it => it.item_type === 'service').length > 0 && (
@@ -627,15 +627,15 @@ export default function Relatorios() {
                                             </div>
                                         </div>
                                         {/* MRR */}
-                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5">
-                                            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                                                <svg className="w-7 h-7 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl border border-slate-700 p-6 flex items-center gap-5" style={{ borderColor: 'rgba(181,148,16,0.25)' }}>
+                                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(181,148,16,0.15)' }}>
+                                                <svg className="w-7 h-7" style={{ color: '#B59410' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
                                                 </svg>
                                             </div>
                                             <div>
                                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Receita Recorrente (MRR)</p>
-                                                <p className="text-3xl font-bold text-emerald-400">{formatBRL(kpis.mrr)}</p>
+                                                <p className="text-3xl font-bold" style={{ color: '#B59410' }}>{formatBRL(kpis.mrr)}</p>
                                                 <p className="text-[10px] text-slate-600 mt-0.5">{kpis.activeSubsCount} assinantes ativos × {formatBRL(MRR_FALLBACK_VALUE)}</p>
                                             </div>
                                         </div>
@@ -646,7 +646,7 @@ export default function Relatorios() {
                                         {/* Monthly Revenue */}
                                         <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                                             <h2 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
                                                 </svg>
                                                 Faturamento Mensal — {selectedYear}
@@ -760,17 +760,17 @@ export default function Relatorios() {
                                                         <div>
                                                             <div className="flex items-center justify-between mb-1.5">
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                                                                    <div className="w-2.5 h-2.5 rounded-full bg-red-600" />
                                                                     <span className="text-sm text-slate-300 font-medium">App</span>
                                                                 </div>
                                                                 <div className="flex items-center gap-2">
-                                                                    <span className="text-sm font-bold text-emerald-400">{origemData.app}</span>
+                                                                    <span className="text-sm font-bold text-red-500">{origemData.app}</span>
                                                                     <span className="text-xs text-slate-500">({appPct.toFixed(1)}%)</span>
                                                                 </div>
                                                             </div>
                                                             <div className="w-full bg-slate-900 rounded-full h-2.5">
                                                                 <div
-                                                                    className="h-2.5 rounded-full bg-emerald-500 transition-all duration-500"
+                                                                    className="h-2.5 rounded-full bg-red-600 transition-all duration-500"
                                                                     style={{ width: `${Math.min(appPct, 100)}%` }}
                                                                 />
                                                             </div>
@@ -1037,7 +1037,7 @@ export default function Relatorios() {
                                                                 <td className="px-6 py-3 text-slate-300 max-w-[300px] truncate">{mov.descricao}</td>
                                                                 <td className="px-6 py-3">
                                                                     {mov.tipo === 'entrada' ? (
-                                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
+                                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-500/10 text-green-400 ring-1 ring-inset ring-green-500/20">
                                                                             ↑ Entrada
                                                                         </span>
                                                                     ) : (
@@ -1046,7 +1046,7 @@ export default function Relatorios() {
                                                                         </span>
                                                                     )}
                                                                 </td>
-                                                                <td className={`px-6 py-3 text-right font-semibold ${mov.tipo === 'entrada' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                <td className={`px-6 py-3 text-right font-semibold ${mov.tipo === 'entrada' ? 'text-green-400' : 'text-rose-400'}`}>
                                                                     {mov.tipo === 'entrada' ? '+' : '-'} {formatBRL(mov.valor)}
                                                                 </td>
                                                             </tr>

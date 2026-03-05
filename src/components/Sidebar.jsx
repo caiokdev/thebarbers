@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { useTheme } from '../context/ThemeContext';
 
 const menuItems = [
     {
@@ -80,8 +79,6 @@ const menuItems = [
 ];
 
 export default function Sidebar() {
-    const { theme } = useTheme();
-    const [shopName, setShopName] = useState('');
     const [adminName, setAdminName] = useState('');
     const [adminInitials, setAdminInitials] = useState('');
 
@@ -95,8 +92,6 @@ export default function Sidebar() {
                     .single();
 
                 if (shop) {
-                    setShopName(shop.name || 'The Barbers');
-
                     const { data: admin } = await supabase
                         .from('profiles')
                         .select('name')
@@ -118,65 +113,67 @@ export default function Sidebar() {
             } catch (_) { }
         }
         fetchSidebarData();
-
-        const channel = supabase
-            .channel('sidebar-barbershop-changes')
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'barbershops' }, (payload) => {
-                if (payload.new?.name) setShopName(payload.new.name);
-            })
-            .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
     }, []);
 
-    const nameParts = shopName.split(' ');
-    const mainName = nameParts.slice(0, -1).join(' ') || shopName;
-    const subName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
-    const logoInitials = shopName ? shopName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase() : 'TB';
-
     return (
-        <aside className="w-[260px] bg-slate-900 text-white h-full flex flex-col flex-shrink-0">
-            {/* Logo */}
-            <div className="h-[72px] flex items-center gap-3 px-6 border-b border-slate-800">
-                <div className={`w-9 h-9 ${theme.bg} rounded-xl flex items-center justify-center text-white font-bold text-sm`}>
-                    {logoInitials}
+        <aside className="w-[260px] h-full flex flex-col flex-shrink-0" style={{ background: 'linear-gradient(180deg, #0a0a0a 0%, #111111 100%)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>
+            {/* ── Logo Header ── */}
+            <div className="h-[80px] flex items-center gap-3 px-5 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                {/* Official circular logo */}
+                <div className="w-12 h-12 rounded-full flex-shrink-0 overflow-hidden" style={{ border: '2px solid #B59410', boxShadow: '0 0 12px rgba(181,148,16,0.3)' }}>
+                    <img src="/logo.png" alt="The Barbers" className="w-full h-full object-cover" />
                 </div>
                 <div>
-                    <p className="font-bold text-base leading-tight">{mainName}</p>
-                    {subName && <p className="text-[11px] text-slate-400 font-medium">{subName}</p>}
+                    <p className="font-black text-white tracking-wide text-sm leading-tight" style={{ letterSpacing: '0.08em' }}>THE</p>
+                    <p className="font-black tracking-widest text-xs leading-tight" style={{ color: '#B59410', letterSpacing: '0.25em' }}>BARBERS</p>
                 </div>
             </div>
 
-            {/* Navigation */}
-            <nav className="flex-1 px-3 py-4 space-y-1">
+            {/* ── Navigation ── */}
+            <nav className="flex-1 px-3 py-5 space-y-0.5 overflow-y-auto">
                 {menuItems.map((item, i) => (
                     <NavLink
                         key={i}
                         to={item.path}
                         end={item.path === '/'}
                         className={({ isActive }) =>
-                            `w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${isActive
-                                ? `${theme.bgLight} ${theme.text}`
-                                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                            `w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 group ${isActive
+                                ? 'bg-gradient-to-r from-red-600/20 to-red-600/5 text-white border border-red-600/30'
+                                : 'text-slate-500 hover:text-white hover:bg-white/5 border border-transparent'
                             }`
                         }
                     >
-                        {item.icon}
-                        {item.label}
+                        {({ isActive }) => (
+                            <>
+                                <span className={`transition-colors ${isActive ? 'text-red-500' : 'text-slate-600 group-hover:text-slate-300'}`}>
+                                    {item.icon}
+                                </span>
+                                <span>{item.label}</span>
+                                {/* Active indicator bar */}
+                                {isActive && (
+                                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                                )}
+                            </>
+                        )}
                     </NavLink>
                 ))}
             </nav>
 
-            {/* Bottom profile */}
-            <div className="px-4 py-4 border-t border-slate-800">
+            {/* ── Bottom Profile ── */}
+            <div className="px-4 py-4 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                 <div className="flex items-center gap-3 px-2">
-                    <div className="w-9 h-9 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg, #B59410 0%, #8a700b 100%)', boxShadow: '0 2px 8px rgba(181,148,16,0.25)' }}>
                         {adminInitials || 'AD'}
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{adminName || 'Admin'}</p>
-                        <p className="text-xs text-slate-500">Admin</p>
+                        <p className="text-sm font-semibold text-white truncate">{adminName || 'Admin'}</p>
+                        <p className="text-[11px]" style={{ color: '#B59410' }}>Administrador</p>
                     </div>
+                    {/* Lock icon */}
+                    <svg className="w-4 h-4 text-slate-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
                 </div>
             </div>
         </aside>

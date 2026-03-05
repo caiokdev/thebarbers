@@ -46,8 +46,8 @@ function KpiCard({ icon, label, value, sub, badge, badgeColor = 'emerald', progr
                 <div className="mt-3">
                     <div className="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
                         <div
-                            className="h-full rounded-full bg-emerald-500 transition-all duration-700"
-                            style={{ width: `${Math.min(progress, 100)}%` }}
+                            className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${Math.min(progress, 100)}%`, background: '#B59410' }}
                         />
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1 text-right">{progress.toFixed(0)}%</p>
@@ -126,7 +126,7 @@ function ChartModal({ open, onClose, data, maxRevenue }) {
                 <div className="mb-6">
                     <h2 className="text-xl font-bold text-slate-100">Faturamento — 7 dias</h2>
                     <p className="text-sm text-slate-400 mt-1">
-                        Total da semana: <span className="text-emerald-400 font-semibold">{formatBRL(data.reduce((s, d) => s + d.value, 0))}</span>
+                        Total da semana: <span className="font-semibold" style={{ color: '#B59410' }}>{formatBRL(data.reduce((s, d) => s + d.value, 0))}</span>
                     </p>
                 </div>
 
@@ -135,9 +135,8 @@ function ChartModal({ open, onClose, data, maxRevenue }) {
                         <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-2">
                             <span className="text-sm text-slate-300 font-semibold">{formatBRL(d.value)}</span>
                             <div
-                                className={`w-full rounded-xl transition-all duration-500 ${d.day === 'Hoje' ? 'bg-emerald-500' : 'bg-emerald-500/25'
-                                    }`}
-                                style={{ height: `${(d.value / maxRevenue) * 100}%`, minHeight: '12px' }}
+                                className="w-full rounded-xl transition-all duration-500"
+                                style={{ height: `${(d.value / maxRevenue) * 100}%`, minHeight: '12px', background: d.day === 'Hoje' ? '#B59410' : 'rgba(181,148,16,0.3)' }}
                             />
                             <span className="text-sm text-slate-400 font-medium">{d.day}</span>
                         </div>
@@ -283,7 +282,7 @@ export default function Dashboard() {
                     <Header />
                     <div className="flex-1 flex items-center justify-center">
                         <div className="text-center">
-                            <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                            <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
                             <p className="text-slate-500 text-sm">Carregando dashboard...</p>
                         </div>
                     </div>
@@ -322,7 +321,7 @@ export default function Dashboard() {
                             value={formatBRL(data.kpis.faturamentoDia)}
                             label="Faturamento Hoje"
                             badge="+12% vs ontem"
-                            badgeColor="emerald"
+                            badgeColor="amber"
                             onClick={() => openDrawer('faturamentoHoje')}
                         />
                         <KpiCard
@@ -347,7 +346,7 @@ export default function Dashboard() {
                             value={formatBRL(faturamentoMes)}
                             label="Meta do Mês"
                             sub={`Meta: ${formatBRL(metaMes)}`}
-                            badgeColor="emerald"
+                            badgeColor="amber"
                             progress={metaPercent}
                             onClick={() => openDrawer('metaMes')}
                         />
@@ -366,8 +365,8 @@ export default function Dashboard() {
                                         <p className="text-xs text-slate-400 mt-1">Total</p>
                                     </div>
                                     <div className="text-center border-l border-r border-slate-700">
-                                        <p className="text-3xl font-bold text-emerald-400">{data.origins.app}</p>
-                                        <p className="text-xs text-slate-400 mt-1">App <span className="text-emerald-400 font-medium">({data.origins.appPercent}%)</span></p>
+                                        <p className="text-3xl font-bold" style={{ color: 'var(--brand-red)' }}>{data.origins.app}</p>
+                                        <p className="text-xs text-slate-400 mt-1">App <span className="font-medium" style={{ color: 'var(--brand-red)' }}>({data.origins.appPercent}%)</span></p>
                                     </div>
                                     <div className="text-center">
                                         <p className="text-3xl font-bold text-blue-400">{data.origins.reception}</p>
@@ -414,14 +413,14 @@ export default function Dashboard() {
                                 icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
                                 label="Comandas abertas"
                                 value={data.kpis.openOrders}
-                                color="emerald"
+                                color="red"
                                 onClick={() => openDrawer('comandasAbertas')}
                             />
                             <MiniCard
                                 icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                                 label="Próximo horário livre"
                                 value="11:00"
-                                color="emerald"
+                                color="amber"
                             />
                             <MiniCard
                                 icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>}
@@ -459,7 +458,7 @@ export default function Dashboard() {
                                     <h2 className="text-base font-semibold text-slate-100">Faturamento — 7 dias</h2>
                                     <p className="text-xs text-slate-500 mt-0.5">Visão semanal • Clique para expandir</p>
                                 </div>
-                                <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400">
+                                <span className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ background: 'rgba(181,148,16,0.15)', color: '#B59410' }}>
                                     {formatBRL(last7Days.reduce((s, d) => s + d.value, 0))}
                                 </span>
                             </div>
@@ -468,9 +467,8 @@ export default function Dashboard() {
                                     <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-1">
                                         <span className="text-[10px] text-slate-500 font-medium">{formatBRL(d.value)}</span>
                                         <div
-                                            className={`w-full rounded-lg transition-all duration-500 ${d.day === 'Hoje' ? 'bg-emerald-500' : 'bg-emerald-500/20'
-                                                }`}
-                                            style={{ height: `${(d.value / maxRevenue) * 100}%`, minHeight: '8px' }}
+                                            className="w-full rounded-lg transition-all duration-500"
+                                            style={{ height: `${(d.value / maxRevenue) * 100}%`, minHeight: '8px', background: d.day === 'Hoje' ? '#B59410' : 'rgba(181,148,16,0.25)' }}
                                         />
                                         <span className="text-[11px] text-slate-500 font-medium">{d.day}</span>
                                     </div>
