@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 /* ═══════════════════════════════════════════════════════════════
    Financeiro — Visão de Águia
@@ -79,6 +82,8 @@ export default function Financeiro() {
     // ── Expandable row states ──
     const [expandedModalOrderId, setExpandedModalOrderId] = useState(null);
     const [expandedHistoricoOrderId, setExpandedHistoricoOrderId] = useState(null);
+    const [expandedProfessionalId, setExpandedProfessionalId] = useState(null);
+
 
     // ── Expense modal ──
     const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -229,9 +234,15 @@ export default function Financeiro() {
                 (clients || []).forEach(c => { clientMap[c.id] = c.name; });
             }
             if (proIds.length > 0) {
-                const { data: pros } = await supabase.from('professionals').select('id, name, commission_rate').in('id', proIds);
+                const { data: pros, error: proError } = await supabase.from('professionals').select('id, name').in('id', proIds);
+                if (proError) console.error("Error fetching professionals:", proError);
+
                 const newRateMap = {};
-                (pros || []).forEach(p => { proMap[p.id] = p.name; newRateMap[p.id] = p.commission_rate ?? 50; });
+                (pros || []).forEach(p => {
+                    proMap[p.id] = p.name;
+                    // Temporarily hardcode or fetch from somewhere else if commission_rate isn't on professionals
+                    newRateMap[p.id] = p.commission_rate ?? 50;
+                });
                 setRateMap(newRateMap);
             }
             setProMapState(proMap);
@@ -276,10 +287,14 @@ export default function Financeiro() {
         if (barbershopId) fetchAll();
     }, [barbershopId, fetchAll]);
 
-    // ── Reset pagination on month change ──
+    // ── Reset pagination and effects on month change ──
     useEffect(() => {
         setCurrentPage(1);
-    }, [selectedMonth]);
+        if (!isCurrentMonth) {
+            setPeriodoComissao('mes'); // Force 'mes' if viewing a past month
+        }
+    }, [selectedMonth, isCurrentMonth]);
+
 
     // ── Saldos ──
     const saldoDia = entradasHoje - saidasHoje;
@@ -301,8 +316,9 @@ export default function Financeiro() {
         filteredOrders.forEach(o => {
             const pid = o.professional_id;
             if (!pid) return;
-            if (!grouped[pid]) grouped[pid] = { nome: proMapState[pid] || 'Sem nome', total: 0 };
+            if (!grouped[pid]) grouped[pid] = { nome: proMapState[pid] || 'Sem nome', total: 0, orders: [] };
             grouped[pid].total += o.total_amount;
+            grouped[pid].orders.push(o);
         });
         return Object.entries(grouped).map(([id, v]) => {
             const rawRate = rateMap[id];
@@ -311,6 +327,7 @@ export default function Financeiro() {
             return {
                 id, nome: v.nome, totalGerado: v.total,
                 rate, valorComissao: isNaN(comissao) ? 0 : comissao,
+                orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at))
             };
         }).sort((a, b) => b.totalGerado - a.totalGerado);
     }, [allClosedOrders, periodoComissao, proMapState, rateMap]);
@@ -383,6 +400,141 @@ export default function Financeiro() {
     const paginatedHistorico = historicoComandas.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const showingFrom = historicoComandas.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
     const showingTo = Math.min(currentPage * itemsPerPage, historicoComandas.length);
+
+    // ── Excel Export ──
+    const exportToExcel = () => {
+        if (!historicoComandas || historicoComandas.length === 0) {
+            alert('Não há dados para exportar neste mês.');
+            return;
+        }
+
+        const dataToExport = historicoComandas.map(item => {
+            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatBRL(it.price)})`).join(' | ');
+
+            return {
+                'Cliente': item.cliente,
+                'Profissional': item.profissional,
+                'Data Fechamento': `${formatDate(item.fechamento)} ${formatTime(item.fechamento)}`,
+                'Método Pagamento': payLabels[item.pagamento] || item.pagamento,
+                'Itens da Comanda': itemsList || 'Sem itens detalhados',
+                'Valor Final (R$)': item.valor.toFixed(2).replace('.', ',')
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(dataToExport);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Financeiro");
+        XLSX.writeFile(wb, `Financeiro_${selectedMonth}.xlsx`);
+    };
+
+    // ── PDF Export ──
+    const exportToPDF = () => {
+        if (!historicoComandas || historicoComandas.length === 0) {
+            alert('Não há dados para exportar neste mês.');
+            return;
+        }
+
+        const doc = new jsPDF('landscape'); // Landscape to fit the items column
+
+        doc.setFontSize(18);
+        doc.text(`Relatório Financeiro - ${selectedMonthLabel} ${selYear}`, 14, 22);
+
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
+
+        const tableColumn = ["Cliente", "Profissional", "Fechamento", "Pagamento", "Itens", "Valor"];
+        const tableRows = [];
+
+        historicoComandas.forEach(item => {
+            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name}`).join(', ');
+
+            const rowData = [
+                item.cliente,
+                item.profissional,
+                `${formatDate(item.fechamento)} ${formatTime(item.fechamento)}`,
+                payLabels[item.pagamento] || item.pagamento,
+                itemsList || '-',
+                formatBRL(item.valor)
+            ];
+            tableRows.push(rowData);
+        });
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 40,
+            theme: 'striped',
+            headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+            alternateRowStyles: { fillColor: [241, 245, 249] },
+            columnStyles: {
+                4: { cellWidth: 80 } // Give more width to the items column
+            }
+        });
+
+        doc.save(`Financeiro_${selectedMonth}.pdf`);
+    };
+
+    const exportProfessionalExcel = (b) => {
+        if (!b.orders || b.orders.length === 0) return alert('Não há comandas para exportar.');
+        const dataToExport = b.orders.map(item => {
+            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatBRL(it.price)})`).join(' | ');
+            return {
+                'Cliente/Pedido': item.cliente || item.id.split('-')[0],
+                'Data Fechamento': `${formatDate(item.closed_at)} ${formatTime(item.closed_at)}`,
+                'Método Pagamento': payLabels[item.payment_method] || item.payment_method || '—',
+                'Itens da Comanda': itemsList || 'Sem itens',
+                'Valor Produzido': parseFloat(item.total_amount || 0).toFixed(2).replace('.', ','),
+                'Valor Comissão': (parseFloat(item.total_amount || 0) * (b.rate / 100)).toFixed(2).replace('.', ',')
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(dataToExport);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Comissao");
+        XLSX.writeFile(wb, `Comissao_${b.nome.replace(/\s+/g, '_')}_${periodoComissao}.xlsx`);
+    };
+
+    const exportProfessionalPDF = (b) => {
+        if (!b.orders || b.orders.length === 0) return alert('Não há comandas para exportar.');
+        const doc = new jsPDF('landscape');
+        doc.setFontSize(16);
+        doc.text(`Relatório de Comissões - ${b.nome}`, 14, 20);
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(`Período analisado: ${periodoComissao === 'mes' ? selectedMonthLabel : (periodoComissao === 'semana' ? 'Últimos 7 dias' : 'Hoje')} | Comissão: ${b.rate}%`, 14, 28);
+
+        const tableColumn = ["Data", "Cliente/Pedido", "Pagamento", "Itens Realizados", "Produção", "Comissão"];
+        const tableRows = b.orders.map(item => {
+            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name}`).join(', ');
+            const prodVal = parseFloat(item.total_amount || 0);
+            const comVal = prodVal * (b.rate / 100);
+            return [
+                `${formatDate(item.closed_at)} ${formatTime(item.closed_at)}`,
+                item.cliente || item.id.split('-')[0],
+                payLabels[item.payment_method] || item.payment_method || '—',
+                itemsList || '-',
+                formatBRL(prodVal),
+                formatBRL(comVal)
+            ];
+        });
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 35,
+            theme: 'striped',
+            headStyles: { fillColor: [44, 62, 80], textColor: 255 },
+            alternateRowStyles: { fillColor: [241, 245, 249] },
+        });
+
+        const finalY = doc.lastAutoTable.finalY || 35;
+        doc.setFontSize(12);
+        doc.setTextColor(50);
+        doc.text(`Produção Bruta: ${formatBRL(b.totalGerado)}  |  Comissão a Pagar: ${formatBRL(b.valorComissao)}`, 14, finalY + 10);
+
+        doc.save(`Comissao_${b.nome.replace(/\s+/g, '_')}_${periodoComissao}.pdf`);
+    };
 
     return (
         <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
@@ -606,39 +758,125 @@ export default function Financeiro() {
                                         <div>
                                             {/* Period filter */}
                                             <div className="flex gap-1.5 mb-4">
-                                                {[{ k: 'hoje', l: 'Hoje' }, { k: 'semana', l: 'Esta Semana' }, { k: 'mes', l: 'Este Mês' }].map(p => (
-                                                    <button key={p.k} onClick={() => setPeriodoComissao(p.k)}
-                                                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${periodoComissao === p.k
-                                                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                                            : 'bg-slate-900/50 text-slate-500 border border-slate-700/30 hover:text-slate-300'
-                                                            }`}
-                                                    >{p.l}</button>
-                                                ))}
+                                                {[{ k: 'hoje', l: 'Hoje' }, { k: 'semana', l: 'Esta Semana' }, { k: 'mes', l: 'Este Mês' }]
+                                                    .filter(p => isCurrentMonth ? true : p.k === 'mes') // Hide hoje/semana for past months
+                                                    .map(p => (
+                                                        <button key={p.k} onClick={() => setPeriodoComissao(p.k)}
+                                                            className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${periodoComissao === p.k
+                                                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                                                : 'bg-slate-900/50 text-slate-500 border border-slate-700/30 hover:text-slate-300'
+                                                                }`}
+                                                        >{isCurrentMonth ? p.l : 'Mês Selecionado'}</button>
+                                                    ))}
                                             </div>
 
                                             {/* Barber list */}
-                                            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                                                {comissoesPorBarbeiro.length > 0 ? comissoesPorBarbeiro.map(b => (
-                                                    <div key={b.id} className="bg-slate-900/40 border border-slate-700/30 rounded-xl p-4 hover:border-slate-600 transition-colors">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <p className="text-sm font-semibold text-slate-200">{b.nome}</p>
-                                                            <button className="text-[10px] px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400/70 border border-emerald-500/20 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all">
-                                                                ✓ Marcar como Pago
-                                                            </button>
-                                                        </div>
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="text-[11px] text-slate-500">Produção Bruta: {formatBRL(b.totalGerado)}</span>
-                                                            <div className="flex items-center gap-1.5">
-                                                                <span className="text-sm font-bold text-emerald-400">Comissão ({b.rate}%): {formatBRL(b.valorComissao)}</span>
-                                                                <button onClick={() => handleEditRate(b.id, b.nome)} className="text-slate-500 hover:text-amber-400 transition-colors" title="Editar taxa">
-                                                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
-                                                                    </svg>
-                                                                </button>
+                                            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                                                {comissoesPorBarbeiro.length > 0 ? comissoesPorBarbeiro.map(b => {
+                                                    const isExpanded = expandedProfessionalId === b.id;
+                                                    return (
+                                                        <div key={b.id} className="bg-slate-900/40 border border-slate-700/30 rounded-xl overflow-hidden hover:border-slate-600 transition-colors">
+                                                            {/* Clickable Header */}
+                                                            <div
+                                                                className="p-4 cursor-pointer"
+                                                                onClick={() => setExpandedProfessionalId(isExpanded ? null : b.id)}
+                                                            >
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <svg className={`w-4 h-4 text-emerald-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                                                        </svg>
+                                                                        <p className="text-sm font-semibold text-slate-200">{b.nome}</p>
+                                                                    </div>
+                                                                    <button onClick={(e) => { e.stopPropagation(); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400/70 border border-emerald-500/20 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all">
+                                                                        ✓ Marcar como Pago
+                                                                    </button>
+                                                                </div>
+                                                                <div className="flex items-center justify-between pl-6">
+                                                                    <span className="text-[11px] text-slate-500">Produção Bruta: {formatBRL(b.totalGerado)}</span>
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <span className="text-sm font-bold text-emerald-400">Comissão ({b.rate}%): {formatBRL(b.valorComissao)}</span>
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleEditRate(b.id, b.nome); }} className="text-slate-500 hover:text-amber-400 transition-colors" title="Editar taxa">
+                                                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                                                                            </svg>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
                                                             </div>
+
+                                                            {/* Expanded Detailed Sub-Table */}
+                                                            {isExpanded && (
+                                                                <div className="bg-slate-800/80 border-t border-slate-700/50 p-4">
+                                                                    <div className="flex items-center justify-between mb-3">
+                                                                        <p className="text-xs font-semibold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                                                                            <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" /></svg>
+                                                                            Comandas ({(b.orders || []).length})
+                                                                        </p>
+                                                                        <div className="flex gap-2">
+                                                                            <button onClick={() => exportProfessionalExcel(b)} className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-emerald-500/50 text-slate-300 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition-all shadow-sm">
+                                                                                <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                                                                                Excel
+                                                                            </button>
+                                                                            <button onClick={() => exportProfessionalPDF(b)} className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-rose-500/50 text-slate-300 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition-all shadow-sm">
+                                                                                <svg className="w-3.5 h-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                                                                                PDF
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {b.orders && b.orders.length > 0 ? (
+                                                                        <div className="overflow-x-auto rounded-lg border border-slate-700/60 overflow-hidden">
+                                                                            <table className="w-full text-left text-xs text-slate-300">
+                                                                                <thead className="text-[10px] uppercase bg-slate-700/40 text-slate-400">
+                                                                                    <tr>
+                                                                                        <th className="px-3 py-2.5 font-semibold">Data/Hora</th>
+                                                                                        <th className="px-3 py-2.5 font-semibold">Cliente</th>
+                                                                                        <th className="px-3 py-2.5 font-semibold min-w-[120px]">Serviços/Produtos</th>
+                                                                                        <th className="px-3 py-2.5 font-semibold text-center">Pagamento</th>
+                                                                                        <th className="px-3 py-2.5 font-semibold text-right bg-emerald-500/10 text-emerald-400">Comissão ({b.rate}%)</th>
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody className="divide-y divide-slate-700/50 bg-slate-900/60">
+                                                                                    {b.orders.map(order => {
+                                                                                        const prodVal = parseFloat(order.total_amount || 0);
+                                                                                        const comVal = prodVal * (b.rate / 100);
+                                                                                        const itemsDesc = (order.order_items || []).map(it => `${it.quantity}x ${it.name}`).join(', ');
+                                                                                        return (
+                                                                                            <tr key={order.id} className="hover:bg-slate-800/80 transition-colors">
+                                                                                                <td className="px-3 py-2.5 whitespace-nowrap">
+                                                                                                    <div className="flex flex-col">
+                                                                                                        <span className="font-medium text-slate-200">{formatDate(order.closed_at)}</span>
+                                                                                                        <span className="text-[10px] text-slate-500">{formatTime(order.closed_at)}</span>
+                                                                                                    </div>
+                                                                                                </td>
+                                                                                                <td className="px-3 py-2.5 font-medium">{order.cliente || order.id.split('-')[0]}</td>
+                                                                                                <td className="px-3 py-2.5 text-[11px] text-slate-400 leading-tight pr-4">{itemsDesc || '-'}</td>
+                                                                                                <td className="px-3 py-2.5 text-center">
+                                                                                                    <span className="px-1.5 py-0.5 bg-slate-800 rounded font-medium text-[10px] text-slate-300 border border-slate-700/50">
+                                                                                                        {payLabels[order.payment_method] || order.payment_method || '-'}
+                                                                                                    </span>
+                                                                                                </td>
+                                                                                                <td className="px-3 py-2.5 text-right font-bold text-emerald-400">
+                                                                                                    {formatBRL(comVal)}
+                                                                                                </td>
+                                                                                            </tr>
+                                                                                        );
+                                                                                    })}
+                                                                                </tbody>
+                                                                            </table>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex flex-col items-center justify-center p-6 bg-slate-900/40 rounded-lg border border-slate-700/40 border-dashed">
+                                                                            <svg className="w-8 h-8 text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                                                                            <p className="text-xs text-slate-500">Nenhum dado detalhado encontrado.</p>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    </div>
-                                                )) : (
+                                                    );
+                                                }) : (
                                                     <div className="text-center py-6">
                                                         <p className="text-xs text-slate-500">Nenhum atendimento no período.</p>
                                                     </div>
@@ -663,7 +901,7 @@ export default function Financeiro() {
                                 LINHA 3 — Histórico de Transações
                             ══════════════════════════════════════════ */}
                             <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
-                                <div className="flex items-center justify-between mb-5">
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-5 gap-4">
                                     <h2 className="text-base font-semibold text-slate-100 flex items-center gap-2">
                                         <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
@@ -671,6 +909,26 @@ export default function Financeiro() {
                                         Histórico de Comandas Fechadas
                                         <span className="text-xs font-normal text-slate-600 ml-2">Últimas {historicoComandas.length}</span>
                                     </h2>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={exportToExcel}
+                                            className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1.5"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                            </svg>
+                                            Excel
+                                        </button>
+                                        <button
+                                            onClick={exportToPDF}
+                                            className="px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1.5"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                            </svg>
+                                            PDF
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {historicoComandas.length > 0 ? (
