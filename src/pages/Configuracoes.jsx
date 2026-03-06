@@ -35,8 +35,7 @@ export default function Configuracoes() {
     const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    // ── Geral ──
-    const [shopData, setShopData] = useState({ name: '', address: '', phone: '' });
+    const [shopData, setShopData] = useState({ name: '', address: '', phone: '', logo: '' });
     const [savingShop, setSavingShop] = useState(false);
 
     // ── Horários ──
@@ -67,7 +66,8 @@ export default function Configuracoes() {
                 .single();
             if (shop) {
                 setBarbershopId(shop.id);
-                setShopData({ name: shop.name || '', address: shop.address || '', phone: shop.phone || '' });
+                const localLogo = localStorage.getItem('shop_logo') || '';
+                setShopData({ name: shop.name || '', address: shop.address || '', phone: shop.phone || '', logo: localLogo });
             }
             setLoading(false);
         }
@@ -123,12 +123,27 @@ export default function Configuracoes() {
                 .update({ name: shopData.name, address: shopData.address, phone: shopData.phone })
                 .eq('id', barbershopId);
             if (error) throw error;
+
+            // Save logo to localStorage and dispatch event for Sidebar update
+            localStorage.setItem('shop_logo', shopData.logo);
+            window.dispatchEvent(new Event('shop_logo_updated'));
+
             alert('Dados salvos com sucesso!');
         } catch (err) {
             alert(`Erro: ${err.message}`);
         } finally {
             setSavingShop(false);
         }
+    };
+
+    const handleLogoUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setShopData(prev => ({ ...prev, logo: reader.result }));
+        };
+        reader.readAsDataURL(file);
     };
 
     // ── Save business hours (upsert) ──
@@ -320,6 +335,27 @@ export default function Configuracoes() {
                                         <input type="text" value={shopData.phone} onChange={e => setShopData(p => ({ ...p, phone: e.target.value }))}
                                             placeholder="(11) 99999-9999"
                                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Foto / Logo da Barbearia</label>
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                                {shopData.logo ? (
+                                                    <img src={shopData.logo} alt="Logo" className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <svg className="w-6 h-6 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                                                    </svg>
+                                                )}
+                                            </div>
+                                            <div className="flex-1">
+                                                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" id="logoUpload" />
+                                                <label htmlFor="logoUpload" className="inline-block px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors shadow-sm mb-1">
+                                                    Escolher Imagem
+                                                </label>
+                                                <p className="text-[11px] text-slate-500">Selecione uma imagem do seu dispositivo para ser a logo principal. Esta imagem será salva localmente e aplicada no menu lateral.</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 

@@ -10,7 +10,7 @@ import autoTable from 'jspdf-autotable';
    KPIs de Médio Prazo • Caixa do Dia • Comissões • Histórico
    ═══════════════════════════════════════════════════════════════ */
 
-const MASTER_PASSWORD = 'admin123';
+const getMasterPassword = () => localStorage.getItem('admin_password') || 'admin123';
 
 const _fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 function formatBRL(v) {
@@ -369,7 +369,8 @@ export default function Financeiro() {
 
     // ── Commission handlers ──
     function handleUnlock() {
-        if (passwordInput === MASTER_PASSWORD) {
+        const masterPassword = getMasterPassword();
+        if (passwordInput === masterPassword) {
             setIsCommissionUnlocked(true);
             setIsPasswordModalOpen(false);
             setPasswordInput('');

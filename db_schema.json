@@ -1,0 +1,28 @@
+{
+  "barbershops": [
+    "id",
+    "name",
+    "created_at",
+    "address",
+    "phone",
+    "theme_color",
+    "reminder_active",
+    "reminder_msg",
+    "feedback_active",
+    "feedback_msg",
+    "noshow_active",
+    "noshow_msg",
+    "rebook_active",
+    "rebook_msg",
+    "birthday_active",
+    "birthday_msg"
+  ],
+  "profiles": [
+    "id",
+    "barbershop_id",
+    "name",
+    "role",
+    "created_at",
+    "commission_rate"
+  ]
+}
