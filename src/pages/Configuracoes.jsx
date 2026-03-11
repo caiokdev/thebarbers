@@ -88,7 +88,14 @@ export default function Configuracoes() {
         if (hours && hours.length > 0) {
             setBusinessHours(DAYS.map(d => {
                 const found = hours.find(h => h.day_of_week === d.key);
-                return found || { day_of_week: d.key, open_time: '09:00', close_time: '20:00', is_closed: true };
+                if (found) {
+                    return {
+                        ...found,
+                        open_time: found.open_time || '09:00',
+                        close_time: found.close_time || '20:00'
+                    };
+                }
+                return { day_of_week: d.key, open_time: '09:00', close_time: '20:00', is_closed: true };
             }));
         }
 
@@ -153,8 +160,8 @@ export default function Configuracoes() {
             const horariosFormatados = businessHours.map(h => ({
                 barbershop_id: barbershopId,
                 day_of_week: h.day_of_week,
-                open_time: h.is_closed ? null : h.open_time,
-                close_time: h.is_closed ? null : h.close_time,
+                open_time: h.is_closed ? null : (h.open_time || '09:00'),
+                close_time: h.is_closed ? null : (h.close_time || '20:00'),
                 is_closed: h.is_closed,
             }));
             const { data, error } = await supabase

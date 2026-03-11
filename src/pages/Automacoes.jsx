@@ -339,7 +339,7 @@ export default function Automacoes() {
         <div className="flex h-screen bg-slate-950 overflow-hidden font-sans">
             <Sidebar />
             <main className="flex-1 flex flex-col h-full overflow-hidden">
-                <Header title="Automações" subtitle="Gerencie os disparos automáticos para seus clientes via WhatsApp" />
+                <Header title="Automações" hideSearch={true} hideNotifications={true} />
 
                 <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
                     <div className="max-w-6xl mx-auto">

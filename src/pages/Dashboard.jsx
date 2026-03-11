@@ -310,7 +310,7 @@ export default function Dashboard() {
             <Sidebar />
 
             <main className="flex-1 flex flex-col h-full overflow-hidden">
-                <Header userName={data.adminName} totalClientes={data.kpis.clients} totalAssinantes={data.kpis.activeSubsCount} />
+                <Header userName={data.adminName} totalClientes={data.kpis.clients} totalAssinantes={data.kpis.activeSubsCount} hideSearch={true} hideNotifications={true} />
 
                 <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
 

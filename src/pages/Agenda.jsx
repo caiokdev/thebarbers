@@ -64,6 +64,7 @@ export default function Agenda() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [professionals, setProfessionals] = useState([]);
     const [clients, setClients] = useState([]);
+    const [searchQuery, setSearchQuery] = useState('');
     const [catalog, setCatalog] = useState([]);       // services + products combined
     const [barbershopId, setBarbershopId] = useState(null);
     const [noshowActive, setNoshowActive] = useState(false);
@@ -235,27 +236,7 @@ export default function Agenda() {
     }, [currentTime, dayConfig, dynamicStartHour, dynamicEndHour]);
 
     // ── Appointment placement helpers ──
-    const appointmentsBySlot = useMemo(() => {
-        const map = {};
-        // Sort chronologically. If same time, no_show goes to bottom.
-        [...(appointments || [])].sort((a, b) => {
-            const timeA = new Date(a.scheduled_at).getTime();
-            const timeB = new Date(b.scheduled_at).getTime();
-            if (timeA !== timeB) return timeA - timeB;
-            if (a.status === 'no_show' && b.status !== 'no_show') return 1;
-            if (a.status !== 'no_show' && b.status === 'no_show') return -1;
-            return 0;
-        }).forEach(a => {
-            if (!a.scheduled_at || !a.professional_id) return;
-            const dt = new Date(a.scheduled_at);
-            const hh = String(dt.getHours()).padStart(2, '0');
-            const mm = dt.getMinutes() < 30 ? '00' : '30';
-            const key = `${hh}:${mm}-${a.professional_id}`;
-            if (!map[key]) map[key] = [];
-            map[key].push(a);
-        });
-        return map;
-    }, [appointments]);
+
 
     // Client lookup
     const clientMap = useMemo(() => {
@@ -280,6 +261,37 @@ export default function Agenda() {
         return m;
     }, [professionals]);
 
+    const appointmentsBySlot = useMemo(() => {
+        const map = {};
+        // Sort chronologically. If same time, no_show goes to bottom.
+        [...(appointments || [])].sort((a, b) => {
+            const timeA = new Date(a.scheduled_at).getTime();
+            const timeB = new Date(b.scheduled_at).getTime();
+            if (timeA !== timeB) return timeA - timeB;
+            if (a.status === 'no_show' && b.status !== 'no_show') return 1;
+            if (a.status !== 'no_show' && b.status === 'no_show') return -1;
+            return 0;
+        }).forEach(a => {
+            if (!a.scheduled_at || !a.professional_id) return;
+
+            // Apply search filter if active
+            if (searchQuery.trim() !== '') {
+                const clientName = clientMap[a.client_id] || '';
+                if (!clientName.toLowerCase().includes(searchQuery.toLowerCase())) {
+                    return; // Skip this appointment if it doesn't match the search
+                }
+            }
+
+            const dt = new Date(a.scheduled_at);
+            const hh = String(dt.getHours()).padStart(2, '0');
+            const mm = dt.getMinutes() < 30 ? '00' : '30';
+            const key = `${hh}:${mm}-${a.professional_id}`;
+            if (!map[key]) map[key] = [];
+            map[key].push(a);
+        });
+        return map;
+    }, [appointments, searchQuery, clientMap]);
+
     // ── Modal handlers ──
     const openModalEmpty = () => { setSelectedSlot({ professionalId: '', time: '' }); setIsModalOpen(true); };
     const openModalFromCell = (professionalId, time) => { setSelectedSlot({ professionalId, time }); setIsModalOpen(true); };
@@ -302,6 +314,19 @@ export default function Agenda() {
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
+                        {/* Search */}
+                        <div className="hidden md:flex items-center gap-2 bg-slate-700/50 rounded-xl px-4 py-2 text-sm text-slate-400 border border-slate-600 focus-within:border-red-600 focus-within:ring-1 focus-within:ring-red-600/30 transition-all">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <input
+                                type="text"
+                                placeholder="Buscar por cliente..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="bg-transparent border-none outline-none text-slate-200 placeholder-slate-400 w-full md:w-56"
+                            />
+                        </div>
                         <button className="relative p-2 text-slate-400 hover:text-slate-200 transition-colors">
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />

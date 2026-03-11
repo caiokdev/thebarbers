@@ -46,6 +46,7 @@ export default function AgendamentoPublico() {
     // ── Step 4: Client info ──
     const [clientName, setClientName] = useState('');
     const [clientPhone, setClientPhone] = useState('');
+    const [clientBirthDate, setClientBirthDate] = useState('');
     const [saving, setSaving] = useState(false);
 
     // ── Success ──
@@ -152,8 +153,8 @@ export default function AgendamentoPublico() {
     const timeSlots = useMemo(() => {
         if (!selectedDate || selectedDate.isClosed || !selectedDate.bh) return [];
 
-        const { open_time, close_time } = selectedDate.bh;
-        if (!open_time || !close_time) return [];
+        const open_time = selectedDate.bh.open_time || '09:00';
+        const close_time = selectedDate.bh.close_time || '20:00';
 
         const [openH, openM] = open_time.split(':').map(Number);
         const [closeH, closeM] = close_time.split(':').map(Number);
@@ -212,12 +213,14 @@ export default function AgendamentoPublico() {
 
             if (existingClient) {
                 clientId = existingClient.id;
-                // Update name if changed
-                await supabase.from('clients').update({ name: clientName.trim() }).eq('id', clientId);
+                // Update name and birth date if provided
+                const updateData = { name: clientName.trim() };
+                if (clientBirthDate) updateData.birth_date = clientBirthDate;
+                await supabase.from('clients').update(updateData).eq('id', clientId);
             } else {
                 const { data: newClient, error: clientErr } = await supabase
                     .from('clients')
-                    .insert({ barbershop_id: barbershopId, name: clientName.trim(), phone: phoneClean })
+                    .insert({ barbershop_id: barbershopId, name: clientName.trim(), phone: phoneClean, birth_date: clientBirthDate || null })
                     .select('id')
                     .single();
                 if (clientErr) throw clientErr;
@@ -683,6 +686,17 @@ export default function AgendamentoPublico() {
                                     value={clientPhone}
                                     onChange={e => setClientPhone(e.target.value)}
                                     placeholder="(11) 99999-9999"
+                                    className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-3.5 text-sm text-slate-800 placeholder-slate-300 focus:outline-none transition-colors"
+                                    onFocus={e => { e.target.style.borderColor = theme.primary; }}
+                                    onBlur={e => { e.target.style.borderColor = '#e2e8f0'; }}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Data de Nascimento (Opcional)</label>
+                                <input
+                                    type="date"
+                                    value={clientBirthDate}
+                                    onChange={e => setClientBirthDate(e.target.value)}
                                     className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-3.5 text-sm text-slate-800 placeholder-slate-300 focus:outline-none transition-colors"
                                     onFocus={e => { e.target.style.borderColor = theme.primary; }}
                                     onBlur={e => { e.target.style.borderColor = '#e2e8f0'; }}

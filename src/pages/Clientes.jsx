@@ -25,11 +25,17 @@ export default function Clientes() {
     const [newClientModal, setNewClientModal] = useState(false);
     const [newName, setNewName] = useState('');
     const [newPhone, setNewPhone] = useState('');
+    const [newBirthDate, setNewBirthDate] = useState('');
     const [newIsSub, setNewIsSub] = useState(false);
     const [saving, setSaving] = useState(false);
 
     const [profileModal, setProfileModal] = useState({ open: false, client: null, orders: [] });
     const [profileLoading, setProfileLoading] = useState(false);
+
+    // Profile Edit State
+    const [isEditingProfile, setIsEditingProfile] = useState(false);
+    const [editName, setEditName] = useState('');
+    const [editBirthDate, setEditBirthDate] = useState('');
 
     // ── Fetch barbershop_id ──
     useEffect(() => {
@@ -55,7 +61,7 @@ export default function Clientes() {
             // 1. All clients
             const { data: clients } = await supabase
                 .from('clients')
-                .select('id, name, phone, is_subscriber, subscription_status, created_at')
+                .select('id, name, phone, birth_date, is_subscriber, subscription_status, created_at')
                 .eq('barbershop_id', bId)
                 .order('name', { ascending: true });
 
@@ -86,6 +92,7 @@ export default function Clientes() {
                 id: c.id,
                 nome: c.name || 'Sem nome',
                 telefone: c.phone || '—',
+                dataNascimento: c.birth_date ? new Date(c.birth_date + 'T12:00:00') : null, // Fix timezone issue for birth dates
                 isSubscriber: c.is_subscriber === true,
                 subscriptionStatus: c.subscription_status || 'none',
                 createdAt: c.created_at,
@@ -141,6 +148,7 @@ export default function Clientes() {
             const { error } = await supabase.from('clients').insert({
                 name: newName.trim(),
                 phone: newPhone.trim() || null,
+                birth_date: newBirthDate || null,
                 is_subscriber: newIsSub,
                 barbershop_id: barbershopId,
             });
@@ -148,6 +156,7 @@ export default function Clientes() {
             setNewClientModal(false);
             setNewName('');
             setNewPhone('');
+            setNewBirthDate('');
             setNewIsSub(false);
             fetchClientes();
         } catch (err) {
@@ -160,6 +169,9 @@ export default function Clientes() {
     // ── Open profile modal ──
     const openProfile = async (client) => {
         setProfileModal({ open: true, client, orders: [] });
+        setIsEditingProfile(false);
+        setEditName(client.nome || '');
+        setEditBirthDate(client.dataNascimento ? client.dataNascimento.toISOString().split('T')[0] : '');
         setProfileLoading(true);
         try {
             const { data: orders } = await supabase
@@ -196,6 +208,61 @@ export default function Clientes() {
             console.error('Erro ao buscar perfil:', err);
         } finally {
             setProfileLoading(false);
+        }
+    };
+
+    // ── Update Client Profile ──
+    const handleUpdateClientProfile = async () => {
+        if (!editName.trim()) return alert('Nome é obrigatório.');
+
+        try {
+            const { error } = await supabase
+                .from('clients')
+                .update({
+                    name: editName.trim(),
+                    birth_date: editBirthDate || null,
+                })
+                .eq('id', profileModal.client.id);
+
+            if (error) throw error;
+
+            // Re-fetch to update all lists and current modal
+            await fetchClientes();
+
+            // Update modal locally to feel instant
+            setProfileModal(prev => ({
+                ...prev,
+                client: {
+                    ...prev.client,
+                    nome: editName.trim(),
+                    dataNascimento: editBirthDate ? new Date(editBirthDate + 'T12:00:00') : null
+                }
+            }));
+
+            setIsEditingProfile(false);
+        } catch (err) {
+            alert('Erro ao atualizar perfil: ' + err.message);
+        }
+    };
+
+    // ── Delete Client ──
+    const handleDeleteClient = async () => {
+        if (!window.confirm("Tem certeza que deseja excluir este cliente permanentemente? Isso pode apagar ou desvincular seu histórico dependendo do banco de dados.")) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('clients')
+                .delete()
+                .eq('id', profileModal.client.id);
+
+            if (error) throw error;
+
+            setProfileModal({ open: false, client: null, orders: [] });
+            fetchClientes();
+        } catch (err) {
+            alert('Erro ao excluir cliente: ' + err.message);
         }
     };
 
@@ -582,6 +649,15 @@ export default function Clientes() {
                                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
                                 />
                             </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Data de Nascimento</label>
+                                <input
+                                    type="date"
+                                    value={newBirthDate}
+                                    onChange={e => setNewBirthDate(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
+                                />
+                            </div>
                             <label className="flex items-center gap-3 cursor-pointer group">
                                 <div className={`w-10 h-6 rounded-full transition-colors flex items-center ${newIsSub ? 'bg-red-600' : 'bg-slate-700'}`}>
                                     <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${newIsSub ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -620,22 +696,64 @@ export default function Clientes() {
                                         {profileModal.client?.nome.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
                                     </div>
                                     <div>
-                                        <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-                                            {profileModal.client?.nome}
-                                            {profileModal.client?.isSubscriber && (
-                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-600/15 text-red-500 border border-red-600/30">
-                                                    Assinante
-                                                </span>
-                                            )}
-                                        </h3>
-                                        <p className="text-xs text-slate-500">{profileModal.client?.telefone}</p>
+                                        {isEditingProfile ? (
+                                            <input
+                                                type="text"
+                                                value={editName}
+                                                onChange={(e) => setEditName(e.target.value)}
+                                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-red-600/50"
+                                            />
+                                        ) : (
+                                            <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+                                                {profileModal.client?.nome}
+                                                {profileModal.client?.isSubscriber && (
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-600/15 text-red-500 border border-red-600/30">
+                                                        Assinante
+                                                    </span>
+                                                )}
+                                            </h3>
+                                        )}
+                                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                                            {profileModal.client?.telefone}
+                                            <span className="pl-2 border-l border-slate-600 flex items-center gap-2">
+                                                Nasc:
+                                                {isEditingProfile ? (
+                                                    <input
+                                                        type="date"
+                                                        value={editBirthDate}
+                                                        onChange={(e) => setEditBirthDate(e.target.value)}
+                                                        className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-xs text-slate-200 focus:outline-none focus:border-red-600/50"
+                                                    />
+                                                ) : (
+                                                    profileModal.client?.dataNascimento ? profileModal.client.dataNascimento.toLocaleDateString('pt-BR') : '—'
+                                                )}
+                                            </span>
+                                        </p>
                                     </div>
                                 </div>
-                                <button onClick={() => setProfileModal({ open: false, client: null, orders: [] })} className="text-slate-500 hover:text-slate-300 transition-colors">
-                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {isEditingProfile ? (
+                                        <>
+                                            <button onClick={() => setIsEditingProfile(false)} className="text-slate-400 hover:text-slate-200 transition-colors text-xs font-medium px-2 py-1">
+                                                Cancelar
+                                            </button>
+                                            <button onClick={handleUpdateClientProfile} className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
+                                                Salvar
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button onClick={() => setIsEditingProfile(true)} className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors" title="Editar Cliente">
+                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                            </svg>
+                                        </button>
+                                    )}
+                                    <button onClick={() => setProfileModal({ open: false, client: null, orders: [] })} className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors">
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                             {/* Subscription toggle */}
                             <div className="mt-4 flex items-center justify-between bg-slate-900/50 rounded-xl px-4 py-3 border border-slate-700/50">
@@ -676,10 +794,21 @@ export default function Clientes() {
                                     </button>
                                 </div>
                             )}
-                            {/* Financial summary */}
-                            <div className="mt-3 bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
-                                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Total deixado na barbearia</p>
-                                <p className="text-2xl font-bold text-red-500">{formatBRL(profileModal.client?.totalGasto)}</p>
+                            {/* Financial summary & Delete action */}
+                            <div className="mt-3 flex gap-3">
+                                <div className="flex-1 bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Total deixado na barbearia</p>
+                                    <p className="text-2xl font-bold" style={{ color: '#B59410' }}>{formatBRL(profileModal.client?.totalGasto)}</p>
+                                </div>
+                                <button
+                                    onClick={handleDeleteClient}
+                                    className="flex items-center justify-center p-4 bg-slate-900/50 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 transition-colors"
+                                    title="Excluir Cliente Permanentemente"
+                                >
+                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                    </svg>
+                                </button>
                             </div>
                         </div>
                         {/* Orders list */}
