@@ -12,6 +12,11 @@ export default function Clientes() {
     // ── State ──
     const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    // Card Info for subscriptions
+    const [cardInfo, setCardInfo] = useState({ name: '', number: '', exp: '', cvv: '' });
+    const [isCardSectionOpen, setIsCardSectionOpen] = useState(false);
     const [clientesLista, setClientesLista] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -27,7 +32,11 @@ export default function Clientes() {
     const [newPhone, setNewPhone] = useState('');
     const [newBirthDate, setNewBirthDate] = useState('');
     const [newIsSub, setNewIsSub] = useState(false);
-    const [saving, setSaving] = useState(false);
+    const [newSelectedPlanId, setNewSelectedPlanId] = useState(null);
+
+    // Plan data & picker
+    const [dbPlans, setDbPlans] = useState([]);
+    const [planPickerModal, setPlanPickerModal] = useState(null); // { clientId } when open
 
     const [profileModal, setProfileModal] = useState({ open: false, client: null, orders: [] });
     const [profileLoading, setProfileLoading] = useState(false);
@@ -57,6 +66,10 @@ export default function Clientes() {
         setLoading(true);
         try {
             const bId = barbershopId;
+
+            // Fetch plans for this barbershop
+            const { data: plansData } = await supabase.from('plans').select('*').eq('barbershop_id', bId);
+            setDbPlans(plansData || []);
 
             // 1. All clients
             const { data: clients } = await supabase
@@ -143,22 +156,60 @@ export default function Clientes() {
     // ── Save new client ──
     const handleSaveClient = async () => {
         if (!newName.trim()) return alert('Nome é obrigatório.');
+        if (newIsSub && !newSelectedPlanId) return alert('Selecione um plano para o assinante.');
         setSaving(true);
         try {
-            const { error } = await supabase.from('clients').insert({
+            const { data: newClientData, error } = await supabase.from('clients').insert({
                 name: newName.trim(),
                 phone: newPhone.trim() || null,
                 birth_date: newBirthDate || null,
                 is_subscriber: newIsSub,
+                subscription_status: newIsSub ? 'active' : 'none',
                 barbershop_id: barbershopId,
-            });
+            }).select('id').single();
             if (error) throw error;
+            
+            if (newIsSub && newClientData?.id) {
+                const validUntil = new Date();
+                validUntil.setDate(validUntil.getDate() + 30);
+                await supabase.from('client_subscriptions').insert({
+                    client_id: newClientData.id,
+                    plan_id: newSelectedPlanId,
+                    status: 'active',
+                    haircuts_used: 0,
+                    shaves_used: 0,
+                    valid_until: validUntil.toISOString(),
+                    payment_method: 'PIX'
+                });
+            }
+
             setNewClientModal(false);
             setNewName('');
             setNewPhone('');
             setNewBirthDate('');
             setNewIsSub(false);
+            setNewSelectedPlanId(null);
+            setCardInfo({ name: '', number: '', exp: '', cvv: '' });
+            setIsCardSectionOpen(false);
             fetchClientes();
+            
+            // If subscribed, try to trigger Celcoin (if card info provided)
+            if (newIsSub && cardInfo.number) {
+                 const { data: { session } } = await supabase.auth.getSession();
+                 const plan = dbPlans.find(p => p.id === newSelectedPlanId);
+                 await fetch(`${supabase.supabaseUrl}/functions/v1/celcoin-subscription`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session?.access_token}`
+                    },
+                    body: JSON.stringify({
+                        clientId: newClientData.id,
+                        planValue: plan?.price || 0,
+                        celcoinToken: "mock_card_token_from_front"
+                    })
+                });
+            }
         } catch (err) {
             alert('Erro ao salvar: ' + err.message);
         } finally {
@@ -269,28 +320,91 @@ export default function Clientes() {
     // ── Toggle subscription ──
     const toggleSubscription = async (clientId, currentStatus) => {
         const newIsSub = !currentStatus;
-        const newSubStatus = newIsSub ? 'active' : 'none';
+        if (newIsSub) {
+            // Show plan picker modal first
+            setPlanPickerModal({ clientId });
+            setCardInfo({ name: '', number: '', exp: '', cvv: '' });
+            setIsCardSectionOpen(false);
+            return;
+        }
+        // Unsubscribing: update directly
         try {
             const { error } = await supabase
                 .from('clients')
-                .update({ is_subscriber: newIsSub, subscription_status: newSubStatus })
+                .update({ is_subscriber: false, subscription_status: 'none' })
+                .eq('id', clientId);
+            if (error) throw error;
+            // Remove subscription record
+            await supabase.from('client_subscriptions').delete().eq('client_id', clientId);
+            setProfileModal(prev => ({
+                ...prev,
+                client: prev.client ? { ...prev.client, isSubscriber: false, subscriptionStatus: 'none' } : prev.client,
+            }));
+            fetchClientes();
+        } catch (err) {
+            alert('Erro ao remover assinatura: ' + err.message);
+        }
+    };
+
+    const confirmPlanSelection = async (planId) => {
+        if (!planPickerModal) return;
+        const clientId = planPickerModal.clientId;
+        setPlanPickerModal(null);
+        try {
+            const { error } = await supabase
+                .from('clients')
+                .update({ is_subscriber: true, subscription_status: 'active' })
                 .eq('id', clientId);
             if (error) throw error;
 
-            // Update modal state instantly
+            const { data: existingSub } = await supabase.from('client_subscriptions').select('id').eq('client_id', clientId).single();
+            if (!existingSub) {
+                const validUntil = new Date();
+                validUntil.setDate(validUntil.getDate() + 30);
+                await supabase.from('client_subscriptions').insert({
+                    client_id: clientId,
+                    plan_id: planId,
+                    status: 'active',
+                    haircuts_used: 0,
+                    shaves_used: 0,
+                    valid_until: validUntil.toISOString(),
+                    payment_method: 'PIX'
+                });
+            } else {
+                // Update plan
+                await supabase.from('client_subscriptions').update({ 
+                    plan_id: planId,
+                    payment_method: 'PIX' 
+                }).eq('client_id', clientId);
+            }
+
             setProfileModal(prev => ({
                 ...prev,
-                client: prev.client ? { ...prev.client, isSubscriber: newIsSub, subscriptionStatus: newSubStatus } : prev.client,
+                client: prev.client ? { ...prev.client, isSubscriber: true, subscriptionStatus: 'active' } : prev.client,
             }));
+            fetchClientes();
 
-            // Update main list + KPIs
-            setClientesLista(prev => {
-                const updated = prev.map(c => c.id === clientId ? { ...c, isSubscriber: newIsSub, subscriptionStatus: newSubStatus } : c);
-                setTotalAssinantes(updated.filter(c => c.isSubscriber === true).length);
-                return updated;
-            });
+            // Trigger Celcoin if card info provided
+            if (cardInfo.number) {
+                const { data: { session } } = await supabase.auth.getSession();
+                const plan = dbPlans.find(p => p.id === planId);
+                await fetch(`${supabase.supabaseUrl}/functions/v1/celcoin-subscription`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session?.access_token}`
+                    },
+                    body: JSON.stringify({
+                        clientId: clientId,
+                        planValue: plan?.price || 0,
+                        celcoinToken: "mock_card_token_from_front"
+                    })
+                });
+            }
+            setCardInfo({ name: '', number: '', exp: '', cvv: '' });
+            setIsCardSectionOpen(false);
         } catch (err) {
-            alert('Erro ao atualizar assinatura: ' + err.message);
+            alert('Erro ao vincular plano: ' + err.message);
         }
     };
 
@@ -628,7 +742,7 @@ export default function Clientes() {
                             </button>
                         </div>
                         {/* Body */}
-                        <div className="px-6 py-5 space-y-4">
+                        <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
                             <div>
                                 <label className="block text-xs font-semibold text-slate-400 mb-1.5">Nome *</label>
                                 <input
@@ -659,12 +773,133 @@ export default function Clientes() {
                                 />
                             </div>
                             <label className="flex items-center gap-3 cursor-pointer group">
-                                <div className={`w-10 h-6 rounded-full transition-colors flex items-center ${newIsSub ? 'bg-red-600' : 'bg-slate-700'}`}>
+                                <div className={`w-10 h-6 rounded-full transition-colors flex items-center ${newIsSub ? 'bg-red-600' : 'bg-slate-700'}`}
+                                    onClick={() => { setNewIsSub(v => !v); setNewSelectedPlanId(null); }}>
                                     <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${newIsSub ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </div>
                                 <span className="text-sm text-slate-300 group-hover:text-slate-200">Assinante do clube</span>
-                                <input type="checkbox" checked={newIsSub} onChange={e => setNewIsSub(e.target.checked)} className="hidden" />
+                                <input type="checkbox" checked={newIsSub} onChange={e => { setNewIsSub(e.target.checked); setNewSelectedPlanId(null); }} className="hidden" />
                             </label>
+                            {/* ── Plan selector (shown when subscriber toggle is on) ── */}
+                            {newIsSub && (
+                                <div className="mt-1">
+                                    <p className="text-xs font-semibold text-slate-400 mb-2">Plano do assinante *</p>
+                                    {dbPlans.length === 0 ? (
+                                        <p className="text-xs text-slate-500 bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700">
+                                            Nenhum plano cadastrado. Crie os planos na aba "Planos" primeiro.
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {dbPlans.map(plan => (
+                                                <button
+                                                    key={plan.id}
+                                                    type="button"
+                                                    onClick={() => setNewSelectedPlanId(plan.id)}
+                                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all text-left ${
+                                                        newSelectedPlanId === plan.id
+                                                            ? 'bg-red-600/15 border-red-500/50 ring-1 ring-red-500/30'
+                                                            : 'bg-slate-900/60 border-slate-700 hover:border-slate-500'
+                                                    }`}
+                                                >
+                                                    <div>
+                                                        <p className={`text-sm font-semibold ${newSelectedPlanId === plan.id ? 'text-white' : 'text-slate-200'}`}>
+                                                            {plan.name}
+                                                        </p>
+                                                        <p className="text-[11px] text-slate-500 mt-0.5">
+                                                            {plan.haircut_limit > 0 ? `${plan.haircut_limit} cortes` : ''}
+                                                            {plan.haircut_limit > 0 && plan.shave_limit > 0 ? ' + ' : ''}
+                                                            {plan.shave_limit > 0 ? `${plan.shave_limit} barbas` : ''}
+                                                            {' · '}
+                                                            {(plan.price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês
+                                                        </p>
+                                                    </div>
+                                                    {newSelectedPlanId === plan.id && (
+                                                        <svg className="w-5 h-5 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* ── Card Capture "Gavetinha" ── */}
+                            {newIsSub && (
+                                <div className="mt-4">
+                                    <button 
+                                        type="button"
+                                        onClick={() => setIsCardSectionOpen(!isCardSectionOpen)}
+                                        className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-all"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                            </svg>
+                                            <span className="text-sm font-semibold text-slate-300">Dados do Cartão (Celcoin)</span>
+                                        </div>
+                                        <svg className={`w-4 h-4 text-slate-500 transition-transform ${isCardSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+                                    
+                                    {isCardSectionOpen && (
+                                        <div className="mt-2 p-4 bg-slate-900 border border-slate-700 rounded-xl space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                            <div>
+                                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Número do Cartão</label>
+                                                <input
+                                                    type="text"
+                                                    value={cardInfo.number}
+                                                    onChange={e => {
+                                                        const val = e.target.value.replace(/\D/g, '').substring(0, 16);
+                                                        const fmt = val.replace(/(\d{4})(?=\d)/g, '$1 ');
+                                                        setCardInfo({ ...cardInfo, number: fmt });
+                                                    }}
+                                                    placeholder="0000 0000 0000 0000"
+                                                    className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 font-mono"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nome no Cartão</label>
+                                                <input
+                                                    type="text"
+                                                    value={cardInfo.name}
+                                                    onChange={e => setCardInfo({ ...cardInfo, name: e.target.value.toUpperCase() })}
+                                                    placeholder="NOME COMPLETO"
+                                                    className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 uppercase"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Validade</label>
+                                                    <input
+                                                        type="text"
+                                                        value={cardInfo.exp}
+                                                        onChange={e => {
+                                                            let val = e.target.value.replace(/\D/g, '').substring(0, 4);
+                                                            if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2);
+                                                            setCardInfo({ ...cardInfo, exp: val });
+                                                        }}
+                                                        placeholder="MM/AA"
+                                                        className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">CVV</label>
+                                                    <input
+                                                        type="text"
+                                                        value={cardInfo.cvv}
+                                                        onChange={e => setCardInfo({ ...cardInfo, cvv: e.target.value.replace(/\D/g, '').substring(0, 4) })}
+                                                        placeholder="123"
+                                                        className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         {/* Footer */}
                         <div className="px-6 py-4 border-t border-slate-700 flex justify-end gap-3">
@@ -836,6 +1071,115 @@ export default function Clientes() {
                                 </div>
                             )}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ════════ PLAN PICKER MODAL ════════ */}
+            {planPickerModal && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setPlanPickerModal(null)}></div>
+                    <div className="relative bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-sm p-8 shadow-2xl">
+                        <h3 className="text-lg font-bold text-white mb-1">Escolha o Plano</h3>
+                        <p className="text-sm text-slate-400 mb-6">Selecione o plano que este cliente irá assinar:</p>
+                        {dbPlans.length === 0 ? (
+                            <div className="text-center py-4">
+                                <p className="text-slate-500 text-sm">Nenhum plano cadastrado ainda.</p>
+                                <p className="text-slate-600 text-xs mt-1">Crie os planos na aba "Planos" primeiro.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {dbPlans.map(plan => (
+                                    <button
+                                        key={plan.id}
+                                        onClick={() => confirmPlanSelection(plan.id)}
+                                        className="w-full flex items-center justify-between px-4 py-4 bg-slate-900 hover:bg-slate-700 border border-slate-700 hover:border-red-500/50 rounded-2xl transition-all group"
+                                    >
+                                        <div className="text-left">
+                                            <p className="text-sm font-bold text-slate-100 group-hover:text-white">{plan.name}</p>
+                                            <p className="text-xs text-slate-500 mt-0.5">
+                                                {plan.haircut_limit > 0 ? `${plan.haircut_limit} cortes` : ''}
+                                                {plan.haircut_limit > 0 && plan.shave_limit > 0 ? ' + ' : ''}
+                                                {plan.shave_limit > 0 ? `${plan.shave_limit} barbas` : ''}
+                                                {' · '}
+                                                {(plan.price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês
+                                            </p>
+                                        </div>
+                                        <svg className="w-5 h-5 text-slate-600 group-hover:text-red-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* ── Card Capture for Existing Client ── */}
+                        <div className="mt-4">
+                            <button 
+                                type="button"
+                                onClick={() => setIsCardSectionOpen(!isCardSectionOpen)}
+                                className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-all"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                    </svg>
+                                    <span className="text-sm font-semibold text-slate-300">Dados do Cartão (Opcional)</span>
+                                </div>
+                                <svg className={`w-4 h-4 text-slate-500 transition-transform ${isCardSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            
+                            {isCardSectionOpen && (
+                                <div className="mt-2 p-4 bg-slate-900 border border-slate-700 rounded-xl space-y-4">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Número do Cartão</label>
+                                        <input
+                                            type="text"
+                                            value={cardInfo.number}
+                                            onChange={e => {
+                                                const val = e.target.value.replace(/\D/g, '').substring(0, 16);
+                                                const fmt = val.replace(/(\d{4})(?=\d)/g, '$1 ');
+                                                setCardInfo({ ...cardInfo, number: fmt });
+                                            }}
+                                            placeholder="0000 0000 0000 0000"
+                                            className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 font-mono"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Validade</label>
+                                            <input
+                                                type="text"
+                                                value={cardInfo.exp}
+                                                onChange={e => {
+                                                    let val = e.target.value.replace(/\D/g, '').substring(0, 4);
+                                                    if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2);
+                                                    setCardInfo({ ...cardInfo, exp: val });
+                                                }}
+                                                placeholder="MM/AA"
+                                                className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">CVV</label>
+                                            <input
+                                                type="text"
+                                                value={cardInfo.cvv}
+                                                onChange={e => setCardInfo({ ...cardInfo, cvv: e.target.value.replace(/\D/g, '').substring(0, 4) })}
+                                                placeholder="123"
+                                                className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <button onClick={() => setPlanPickerModal(null)} className="mt-6 w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-semibold transition-colors">
+                            Cancelar
+                        </button>
                     </div>
                 </div>
             )}
