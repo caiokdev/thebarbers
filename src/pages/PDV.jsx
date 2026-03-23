@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
@@ -110,7 +111,7 @@ export default function PDV() {
         // Stock validation for products
         if (catalogItem.item_type === 'product') {
             if ((catalogItem.current_stock ?? 0) <= 0) {
-                alert('Produto esgotado! Não é possível adicionar ao carrinho.');
+                toast.error('Produto esgotado! Não é possível adicionar ao carrinho.');
                 return;
             }
             // Check if adding 1 more exceeds stock
@@ -119,7 +120,7 @@ export default function PDV() {
             );
             const currentQtyInCart = existingInCart ? existingInCart.quantity : 0;
             if (currentQtyInCart + 1 > catalogItem.current_stock) {
-                alert(`Estoque insuficiente. Apenas ${catalogItem.current_stock} unidades disponíveis.`);
+                toast.error(`Estoque insuficiente. Apenas ${catalogItem.current_stock} unidades disponíveis.`);
                 return;
             }
         }
@@ -164,7 +165,7 @@ export default function PDV() {
             if (delta > 0 && ci.item_type === 'product') {
                 const catalogItem = catalog.find(c => c.name === ci.name && c.item_type === 'product');
                 if (catalogItem && newQty > (catalogItem.current_stock ?? 0)) {
-                    alert(`Estoque insuficiente. Apenas ${catalogItem.current_stock} unidades disponíveis de "${ci.name}".`);
+                    toast.error(`Estoque insuficiente. Apenas ${catalogItem.current_stock} unidades disponíveis de "${ci.name}".`);
                     return ci;
                 }
             }
@@ -212,92 +213,34 @@ export default function PDV() {
         setFinalizing(true);
 
         try {
-            // 0. PRE-CLOSE STOCK VALIDATION — re-check fresh stock from DB
-            const productItemsInCart = comandaItems.filter(ci => ci.item_type === 'product');
-            if (productItemsInCart.length > 0) {
-                const productIds = productItemsInCart
-                    .map(ci => ci.catalogId || catalog.find(c => c.name === ci.name && c.item_type === 'product')?.catalogId)
-                    .filter(Boolean);
+            const payloadItems = comandaItems.map(ci => ({
+                id: ci.id,
+                name: ci.name,
+                price: ci.price,
+                quantity: ci.quantity,
+                item_type: ci.item_type,
+                catalogId: ci.catalogId || catalog.find(c => c.name === ci.name && c.item_type === ci.item_type)?.catalogId
+            }));
 
-                if (productIds.length > 0) {
-                    const { data: freshProducts } = await supabase
-                        .from('products')
-                        .select('id, name, current_stock')
-                        .in('id', productIds);
+            const { error: rpcError } = await supabase.rpc('finalize_checkout', {
+                p_order_id: id,
+                p_total_amount: cartTotal,
+                p_payment_method: selectedPaymentMethod,
+                p_items: payloadItems
+            });
 
-                    const freshMap = {};
-                    (freshProducts || []).forEach(p => { freshMap[p.id] = p; });
-
-                    for (const ci of productItemsInCart) {
-                        const pid = ci.catalogId || catalog.find(c => c.name === ci.name && c.item_type === 'product')?.catalogId;
-                        const fresh = freshMap[pid];
-                        if (fresh && ci.quantity > fresh.current_stock) {
-                            alert(`O produto "${ci.name}" não tem estoque suficiente para fechar a comanda. Disponível: ${fresh.current_stock}, no carrinho: ${ci.quantity}.`);
-                            setFinalizing(false);
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // 1. Update order status, total, payment method, closed_at
-            const { error: updateError } = await supabase
-                .from('orders')
-                .update({
-                    status: 'closed',
-                    total_amount: cartTotal,
-                    payment_method: selectedPaymentMethod,
-                    closed_at: new Date().toISOString(),
-                })
-                .eq('id', id);
-
-            if (updateError) throw updateError;
-
-            // 2. Sync order_items: delete existing, insert current cart
-            await supabase.from('order_items').delete().eq('order_id', id);
-
-            if (comandaItems.length > 0) {
-                const itemsToInsert = comandaItems.map(ci => ({
-                    order_id: id,
-                    name: ci.name,
-                    price: ci.price,
-                    quantity: ci.quantity,
-                    item_type: ci.item_type,
-                }));
-                const { error: itemsError } = await supabase
-                    .from('order_items')
-                    .insert(itemsToInsert);
-                if (itemsError) console.warn('order_items insert warning:', itemsError.message);
-            }
-
-            // 3. Stock decrement — decrease current_stock for each product sold
-            const productItems = comandaItems.filter(ci => ci.item_type === 'product');
-            if (productItems.length > 0) {
-                const stockUpdates = productItems.map(async (ci) => {
-                    // Find the catalogId from the cart item or catalog
-                    const catItem = catalog.find(c => c.name === ci.name && c.item_type === 'product');
-                    const productId = ci.catalogId || catItem?.catalogId;
-                    const currentStock = catItem?.current_stock ?? 0;
-                    if (productId) {
-                        const newStock = Math.max(0, currentStock - ci.quantity);
-                        const { error: stockErr } = await supabase
-                            .from('products')
-                            .update({ current_stock: newStock })
-                            .eq('id', productId);
-                        if (stockErr) console.warn(`Erro ao dar baixa no estoque de "${ci.name}":`, stockErr.message);
-                    } else {
-                        console.warn(`Produto "${ci.name}" não encontrado no catálogo para baixa de estoque.`);
-                    }
-                });
-                await Promise.all(stockUpdates);
+            if (rpcError) {
+                throw rpcError;
             }
 
             // 4. Success
-            alert('✅ Comanda fechada com sucesso!');
+            toast.success('Comanda fechada com sucesso!');
             navigate('/');
         } catch (err) {
             console.error('Erro ao fechar comanda:', err);
-            alert('Erro ao fechar comanda. Tente novamente.');
+            // Mostrar a mensagem de erro que vem do backend, caso seja erro de estoque
+            const errMsg = err.message || err.details || 'Erro ao fechar comanda. Tente novamente.';
+            toast.error(errMsg);
         } finally {
             setFinalizing(false);
         }

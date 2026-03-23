@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
@@ -70,7 +71,7 @@ export default function Planos() {
     const [selectedSubscriber, setSelectedSubscriber] = useState(null);
     const [subDetails, setSubDetails] = useState(null);
     const [detailsLoading, setDetailsLoading] = useState(false);
-    const [subForm, setSubForm] = useState({ haircuts_used: 0, shaves_used: 0, valid_until: '' });
+    const [subForm, setSubForm] = useState({ haircuts_used: 0, shaves_used: 0, valid_until: '', status: 'active' });
 
     // Checkout Modal State
     const [checkoutPlan, setCheckoutPlan] = useState(null);
@@ -167,7 +168,7 @@ export default function Planos() {
             setShowEditModal(false);
             fetchPlans();
         } catch (err) {
-            alert(`Erro ao salvar: ${err.message}`);
+            toast.error(`Erro ao salvar: ${err.message}`);
         } finally {
             setSaving(false);
         }
@@ -194,13 +195,14 @@ export default function Planos() {
                 setSubForm({
                     haircuts_used: subData.haircuts_used || 0,
                     shaves_used: subData.shaves_used || 0,
-                    valid_until: subData.valid_until ? new Date(subData.valid_until).toISOString().split('T')[0] : ''
+                    valid_until: subData.valid_until ? new Date(subData.valid_until).toISOString().split('T')[0] : '',
+                    status: subData.status || 'active'
                 });
             } else {
                 setSubDetails(null);
             }
         } catch (err) {
-            alert('Erro ao carregar os detalhes da assinatura.');
+            toast.error('Erro ao carregar os detalhes da assinatura.');
         } finally {
             setDetailsLoading(false);
         }
@@ -212,27 +214,31 @@ export default function Planos() {
         try {
             const validUntilIso = new Date(subForm.valid_until + 'T23:59:59').toISOString();
             
-            // Update client_subscriptions
+            // Priority for manual status override, but still auto-calculate if manual is 'active' 
+            // but the date is in the past. If manual is 'overdue', it stays 'overdue'.
+            const dateIsOverdue = new Date(subForm.valid_until + 'T23:59:59') < new Date();
+            const newStatus = (subForm.status === 'overdue' || dateIsOverdue) ? 'overdue' : 'active';
+            
+            // 1. Update client_subscriptions
             const { error: subErr } = await supabase.from('client_subscriptions').update({
                 haircuts_used: parseInt(subForm.haircuts_used, 10),
                 shaves_used: parseInt(subForm.shaves_used, 10),
-                valid_until: validUntilIso
+                valid_until: validUntilIso,
+                status: newStatus
             }).eq('id', subDetails.id);
             if (subErr) throw subErr;
 
-            // If renewing manually, fix clients table status
-            if (selectedSubscriber.subscription_status === 'overdue') {
-                const { error: clientErr } = await supabase.from('clients').update({
-                    subscription_status: 'active'
-                }).eq('id', selectedSubscriber.id);
-                if (clientErr) throw clientErr;
-            }
+            // 2. Update clients table
+            const { error: clientErr } = await supabase.from('clients').update({
+                subscription_status: newStatus
+            }).eq('id', selectedSubscriber.id);
+            if (clientErr) throw clientErr;
 
-            alert('Assinatura atualizada com sucesso!');
+            toast.success('Assinatura atualizada com sucesso!');
             setSelectedSubscriber(null);
             fetchPlans(); // Refresh the list
         } catch (err) {
-            alert(`Erro ao atualizar assinatura: ${err.message}`);
+            toast.error(`Erro ao atualizar assinatura: ${err.message}`);
         } finally {
             setSaving(false);
         }
@@ -269,11 +275,11 @@ export default function Planos() {
             }).eq('id', selectedSubscriber.id);
             if (clientErr) throw clientErr;
 
-            alert('Assinatura renovada (zerada) com sucesso para mais 30 dias!');
+            toast.success('Assinatura renovada (zerada) com sucesso para mais 30 dias!');
             setSelectedSubscriber(null);
             fetchPlans();
         } catch (err) {
-            alert(`Erro ao renovar: ${err.message}`);
+            toast.error(`Erro ao renovar: ${err.message}`);
         } finally {
             setSaving(false);
         }
@@ -299,11 +305,11 @@ export default function Planos() {
                 .eq('id', selectedSubscriber.id);
             if (clientErr) throw clientErr;
 
-            alert('Assinatura cancelada com sucesso.');
+            toast.success('Assinatura cancelada com sucesso.');
             setSelectedSubscriber(null);
             fetchPlans();
         } catch (err) {
-            alert(`Erro ao cancelar assinatura: ${err.message}`);
+            toast.error(`Erro ao cancelar assinatura: ${err.message}`);
         } finally {
             setSaving(false);
         }
@@ -320,11 +326,11 @@ export default function Planos() {
 
     const handleCheckout = async () => {
         if (!selectedClient) {
-            alert("Selecione um cliente para prosseguir.");
+            toast.error("Selecione um cliente para prosseguir.");
             return;
         }
         if (!checkoutCardInfo.name || !checkoutCardInfo.number || !checkoutCardInfo.exp || !checkoutCardInfo.cvv) {
-            alert("Preencha todos os dados do cartão.");
+            toast.error("Preencha todos os dados do cartão.");
             return;
         }
 
@@ -391,11 +397,11 @@ export default function Planos() {
                 subscription_status: 'active'
             }).eq('id', client.id);
 
-            alert("Assinatura criada com sucesso! A cobrança recorrente foi ativada.");
+            toast.success("Assinatura criada com sucesso! A cobrança recorrente foi ativada.");
             setCheckoutPlan(null);
             fetchPlans(); // Refresh the subscriber list
         } catch (err) {
-            alert(`Erro no Checkout: ${err.message}`);
+            toast.error(`Erro no Checkout: ${err.message}`);
         } finally {
             setCheckingOut(false);
         }
@@ -582,6 +588,7 @@ export default function Planos() {
                                     type="number"
                                     step="0.01"
                                     min="0"
+                                    max="10000"
                                     value={editForm.price}
                                     onChange={e => setEditForm({ ...editForm, price: e.target.value })}
                                     onKeyDown={e => e.key === 'Enter' && handleSavePlan()}
@@ -677,7 +684,7 @@ export default function Planos() {
                                                     <input
                                                         type="number"
                                                         min="0"
-                                                        max={subDetails.plans?.haircut_limit ?? undefined}
+                                                        max="100"
                                                         value={subForm.haircuts_used}
                                                         onChange={e => setSubForm({...subForm, haircuts_used: Math.min(Number(e.target.value), subDetails.plans?.haircut_limit ?? 9999)})}
                                                         className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-2 text-center text-white font-bold focus:outline-none focus:border-red-500"
@@ -709,11 +716,48 @@ export default function Planos() {
                                         </div>
                                     </div>
 
-                                    <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 relative">
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Válido até</label>
+                                     {/* Situação da Assinatura Seletor */}
+                                    <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700">
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Situação da Assinatura</p>
+                                        <div className="flex p-1 bg-slate-800 rounded-xl border border-slate-700">
+                                            <button 
+                                                onClick={() => setSubForm({...subForm, status: 'active'})}
+                                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                    subForm.status === 'active' 
+                                                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
+                                                    : 'text-slate-500 hover:text-slate-300'
+                                                }`}
+                                            >
+                                                <div className={`w-1.5 h-1.5 rounded-full ${subForm.status === 'active' ? 'bg-white' : 'bg-slate-600'}`}></div>
+                                                Em Dia
+                                            </button>
+                                            <button 
+                                                onClick={() => setSubForm({...subForm, status: 'overdue'})}
+                                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                    subForm.status === 'overdue' 
+                                                    ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
+                                                    : 'text-slate-500 hover:text-slate-300'
+                                                }`}
+                                            >
+                                                <div className={`w-1.5 h-1.5 rounded-full ${subForm.status === 'overdue' ? 'bg-white' : 'bg-slate-600'} ${subForm.status === 'overdue' ? 'animate-pulse' : ''}`}></div>
+                                                Atrasado
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className={`bg-slate-900/50 p-4 rounded-2xl border border-slate-700 relative transition-all duration-300 ${
+                                        subForm.status === 'overdue' ? 'opacity-40 grayscale-[0.5] select-none pointer-events-none' : ''
+                                    }`}>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest">Válido até</label>
+                                            {subForm.status === 'overdue' && (
+                                                <span className="text-[10px] bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full font-bold border border-red-500/20">Bloqueado</span>
+                                            )}
+                                        </div>
                                         <input
                                             type="date"
                                             value={subForm.valid_until}
+                                            disabled={subForm.status === 'overdue'}
                                             onChange={e => setSubForm({...subForm, valid_until: e.target.value})}
                                             className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-500 transition-colors"
                                         />

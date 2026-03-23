@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
@@ -135,9 +136,9 @@ export default function Configuracoes() {
             localStorage.setItem('shop_logo', shopData.logo);
             window.dispatchEvent(new Event('shop_logo_updated'));
 
-            alert('Dados salvos com sucesso!');
+            toast.success('Dados salvos com sucesso!');
         } catch (err) {
-            alert(`Erro: ${err.message}`);
+            toast.error(`Erro: ${err.message}`);
         } finally {
             setSavingShop(false);
         }
@@ -172,9 +173,9 @@ export default function Configuracoes() {
             if (data) {
                 setBusinessHours(data.sort((a, b) => a.day_of_week - b.day_of_week));
             }
-            alert('Horários salvos com sucesso!');
+            toast.success('Horários salvos com sucesso!');
         } catch (err) {
-            alert(`Erro: ${err.message}`);
+            toast.error(`Erro: ${err.message}`);
         } finally {
             setSavingHours(false);
         }
@@ -192,7 +193,7 @@ export default function Configuracoes() {
         setShowServiceModal(true);
     };
     const handleSaveService = async () => {
-        if (!serviceForm.name.trim()) { alert('Nome é obrigatório.'); return; }
+        if (!serviceForm.name.trim()) { toast.error('Nome é obrigatório.'); return; }
         setSavingService(true);
         try {
             const payload = {
@@ -211,7 +212,7 @@ export default function Configuracoes() {
             setShowServiceModal(false);
             fetchAll();
         } catch (err) {
-            alert(`Erro: ${err.message}`);
+            toast.error(`Erro: ${err.message}`);
         } finally {
             setSavingService(false);
         }
@@ -229,7 +230,7 @@ export default function Configuracoes() {
         setShowProModal(true);
     };
     const handleSavePro = async () => {
-        if (!proForm.name.trim()) { alert('Nome é obrigatório.'); return; }
+        if (!proForm.name.trim()) { toast.error('Nome é obrigatório.'); return; }
         setSavingPro(true);
         try {
             const payload = {
@@ -249,7 +250,7 @@ export default function Configuracoes() {
             setShowProModal(false);
             fetchAll();
         } catch (err) {
-            alert(`Erro: ${err.message}`);
+            toast.error(`Erro: ${err.message}`);
         } finally {
             setSavingPro(false);
         }
@@ -261,7 +262,7 @@ export default function Configuracoes() {
             if (error) throw error;
             fetchAll();
         } catch (err) {
-            alert(`Erro ao excluir: ${err.message}`);
+            toast.error(`Erro ao excluir: ${err.message}`);
         }
     };
 

@@ -1,0 +1,54 @@
+{
+  "required": [
+    "id",
+    "valid_until"
+  ],
+  "properties": {
+    "id": {
+      "default": "gen_random_uuid()",
+      "description": "Note:\nThis is a Primary Key.<pk/>",
+      "format": "uuid",
+      "type": "string"
+    },
+    "client_id": {
+      "description": "Note:\nThis is a Foreign Key to `clients.id`.<fk table='clients' column='id'/>",
+      "format": "uuid",
+      "type": "string"
+    },
+    "plan_id": {
+      "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+      "format": "uuid",
+      "type": "string"
+    },
+    "status": {
+      "default": "active",
+      "format": "text",
+      "type": "string"
+    },
+    "haircuts_used": {
+      "default": 0,
+      "format": "integer",
+      "type": "integer"
+    },
+    "shaves_used": {
+      "default": 0,
+      "format": "integer",
+      "type": "integer"
+    },
+    "valid_until": {
+      "format": "timestamp with time zone",
+      "type": "string"
+    },
+    "created_at": {
+      "default": "now()",
+      "format": "timestamp with time zone",
+      "type": "string"
+    },
+    "updated_at": {
+      "default": "now()",
+      "format": "timestamp with time zone",
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

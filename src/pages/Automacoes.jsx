@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
@@ -133,10 +134,10 @@ export default function Automacoes() {
                 .eq('id', barbershopId);
 
             if (error) throw error;
-            alert('Automações salvas com sucesso!');
+            toast.success('Automações salvas com sucesso!');
         } catch (error) {
             console.error('Erro ao salvar automações:', error);
-            alert('Erro ao salvar automações. Tente novamente.');
+            toast.error('Erro ao salvar automações. Tente novamente.');
         } finally {
             setSaving(false);
         }
@@ -219,7 +220,7 @@ export default function Automacoes() {
             setFailedLogs(prev => prev.filter(o => o.id !== logId));
         } catch (error) {
             console.error("Erro ao resolver falha", error);
-            alert("Erro ao resolver falha no banco.");
+            toast.error("Erro ao resolver falha no banco.");
         }
     };
 

@@ -115,8 +115,22 @@ export default function OrderDetailsModal({ order, clientMap, proMap, onClose, o
                 {['canceled', 'closed', 'no_show', 'completed'].includes(order.status) ? (
                     <div className="pt-4 border-t border-slate-700">
                         <p className="text-center text-sm text-slate-500 italic">
-                            {order.status === 'no_show' ? '⚠️ Cliente não compareceu a este agendamento.' : 'Nenhuma ação disponível para este status.'}
+                            {order.status === 'no_show' ? '⚠️ Cliente não compareceu a este agendamento.' : 'Resumo do agendamento (Ações limitadas).'}
                         </p>
+                        {['no_show', 'canceled'].includes(order.status) && onDelete && (
+                            <div className="mt-4">
+                                <button
+                                    onClick={handleDelete}
+                                    disabled={actionLoading}
+                                    className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500 hover:text-white disabled:opacity-50"
+                                >
+                                    {actionLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : (
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    )}
+                                    Excluir / Limpar da Agenda
+                                </button>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className="space-y-3 pt-4 border-t border-slate-700">

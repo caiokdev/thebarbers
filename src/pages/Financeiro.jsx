@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 import * as XLSX from 'xlsx';
@@ -59,6 +60,7 @@ export default function Financeiro() {
     const [allClosedOrders, setAllClosedOrders] = useState([]);
     const [proMapState, setProMapState] = useState({});
     const [rateMap, setRateMap] = useState({}); // { proId: commission_rate }
+    const [commissionPayments, setCommissionPayments] = useState([]); // Array para armazenar os pagamentos já feitos
 
     // ── Global month filter ──
     const nowInit = new Date();
@@ -82,6 +84,7 @@ export default function Financeiro() {
     // ── Expandable row states ──
     const [expandedModalOrderId, setExpandedModalOrderId] = useState(null);
     const [expandedHistoricoOrderId, setExpandedHistoricoOrderId] = useState(null);
+    const [showAllHistorico, setShowAllHistorico] = useState(false);
     const [expandedProfessionalId, setExpandedProfessionalId] = useState(null);
     const [clientMapState, setClientMapState] = useState({});
 
@@ -210,16 +213,28 @@ export default function Financeiro() {
             setAssinantesAtivos(allSubs.filter(s => s.subscription_status === 'active').length);
             setAssinantesAtrasados(allSubs.filter(s => s.subscription_status !== 'active' && s.subscription_status !== 'none').length);
 
+            // ═══ 5.5 PAGAMENTOS DE COMISSÕES ═══
+            const { data: payments } = await supabase
+                .from('commission_payments')
+                .select('*')
+                .eq('barbershop_id', bId);
+            setCommissionPayments(payments || []);
+
             // ═══ 6. HISTÓRICO DE COMANDAS FECHADAS (filtrado pelo mês) ═══
-            const { data: historico } = await supabase
+            let historicoQuery = supabase
                 .from('orders')
-                .select('id, total_amount, created_at, scheduled_at, closed_at, payment_method, client_id, professional_id, order_items(name, price, quantity, item_type)')
+                .select('id, total_amount, created_at, scheduled_at, closed_at, payment_method, client_id, professional_id, notes, order_items(name, price, quantity, item_type)')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed')
                 .gte('closed_at', startOfMonthISO)
                 .lte('closed_at', endOfMonthISO)
-                .order('closed_at', { ascending: false })
-                .limit(100);
+                .order('closed_at', { ascending: false });
+
+            if (!showAllHistorico) {
+                historicoQuery = historicoQuery.limit(25);
+            }
+
+            const { data: historico } = await historicoQuery;
 
             // Resolve client + professional names (for ALL order arrays)
             const allOrderArrays = [todayOrders, orders7d, ordersMes, historico].filter(Boolean);
@@ -285,7 +300,7 @@ export default function Financeiro() {
         } finally {
             setLoading(false);
         }
-    }, [barbershopId, startOfDayISO, endOfDayISO, sevenDaysAgo, startOfMonthISO, endOfMonthISO, selectedMonth]);
+    }, [barbershopId, startOfDayISO, endOfDayISO, sevenDaysAgo, startOfMonthISO, endOfMonthISO, selectedMonth, showAllHistorico]);
 
     useEffect(() => {
         if (barbershopId) fetchAll();
@@ -328,22 +343,41 @@ export default function Financeiro() {
             });
         });
 
-        return Object.entries(grouped).map(([id, v]) => {
+        let comissoes = Object.entries(grouped).map(([id, v]) => {
             const rawRate = rateMap[id];
             const rate = (typeof rawRate === 'number' && !isNaN(rawRate)) ? rawRate : 50;
-            const comissao = v.total * (rate / 100);
+            
+            // Subdivide orders into paid and unpaid based on the [PAID] flag
+            const unpaidOrders = v.orders.filter(o => !(o.notes || '').includes('[PAID]'));
+            const paidOrders = v.orders.filter(o => (o.notes || '').includes('[PAID]'));
+
+            const unpaidTotal = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+            const paidTotal = paidOrders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+
+            let remainingCommission = unpaidTotal * (rate / 100);
+            let alreadyPaidCommission = paidTotal * (rate / 100);
+            
+            if (remainingCommission < 0.01) remainingCommission = 0;
+
             return {
-                id, nome: v.nome, totalGerado: v.total,
-                rate, valorComissao: isNaN(comissao) ? 0 : comissao,
-                orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at))
+                id, 
+                nome: v.nome, 
+                totalGerado: v.total,
+                rate, 
+                valorComissao: remainingCommission, 
+                valorPago: alreadyPaidCommission,
+                orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)),
+                unpaidOrders // keep track of which exact orders are pending
             };
-        }).sort((a, b) => b.totalGerado - a.totalGerado);
-    }, [allClosedOrders, periodoComissao, proMapState, rateMap, clientMapState]);
+        });
+
+        return comissoes.filter(c => c.valorComissao > 0).sort((a, b) => b.totalGerado - a.totalGerado);
+    }, [allClosedOrders, periodoComissao, proMapState, rateMap, clientMapState, commissionPayments, selectedMonthLabel]);
 
     // ── Save expense ──
     async function handleSaveExpense() {
         if (!expenseDesc.trim() || !expenseAmount || parseFloat(expenseAmount) <= 0) {
-            alert('Preencha a descrição e um valor válido.');
+            toast.error('Preencha a descrição e um valor válido.');
             return;
         }
         setSavingExpense(true);
@@ -361,7 +395,7 @@ export default function Financeiro() {
             setExpenseAmount('');
             fetchAll();
         } catch (err) {
-            alert(`Erro ao registrar saída: ${err.message}`);
+            toast.error(`Erro ao registrar saída: ${err.message}`);
         } finally {
             setSavingExpense(false);
         }
@@ -384,10 +418,47 @@ export default function Financeiro() {
         const input = prompt(`Nova porcentagem de comissão para ${proName} (ex: 45):`);
         if (input === null) return;
         const newRate = parseFloat(input);
-        if (isNaN(newRate) || newRate < 0 || newRate > 100) { alert('Valor inválido. Use um número entre 0 e 100.'); return; }
+        if (isNaN(newRate) || newRate < 0 || newRate > 100) { toast.error('Valor inválido. Use um número entre 0 e 100.'); return; }
         const { error } = await supabase.from('professionals').update({ commission_rate: newRate }).eq('id', proId);
-        if (error) { alert(`Erro: ${error.message}`); return; }
+        if (error) { toast.error(`Erro: ${error.message}`); return; }
         setRateMap(prev => ({ ...prev, [proId]: newRate }));
+    }
+
+    async function handlePayCommission(b) {
+        if (!confirm(`Confirma o pagamento de comissão no valor de ${formatBRL(b.valorComissao)} para ${b.nome}?`)) return;
+        setLoading(true);
+        try {
+            // 1. Mark unpaid orders with [PAID] flag
+            if (b.unpaidOrders && b.unpaidOrders.length > 0) {
+                await Promise.all(b.unpaidOrders.map(async (o) => {
+                    const newNotes = (o.notes || '') + '\n[PAID]';
+                    await supabase.from('orders').update({ notes: newNotes.trim() }).eq('id', o.id);
+                }));
+            }
+
+            // 2. Save historical receipt
+            const periodLabel = periodoComissao === 'mes' ? selectedMonthLabel : (periodoComissao === 'semana' ? 'Esta Semana' : 'Hoje');
+            const { error } = await supabase.from('commission_payments').insert({
+                barbershop_id: barbershopId,
+                professional_id: b.id,
+                amount: b.valorComissao,
+                commission_rate: b.rate,
+                gross_production: b.totalGerado,
+                period_label: periodLabel
+            });
+            if (error) {
+                if (error.code === '42P01') toast.error('Execute o comando SQL para criar a tabela de comissões primeiro!');
+                else throw error;
+                return;
+            }
+            toast.success('Pagamento registrado no histórico!');
+            fetchAll();
+
+        } catch (err) {
+            toast.error(`Erro ao registrar: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
     }
 
     // ── Date label ──
@@ -413,7 +484,7 @@ export default function Financeiro() {
     // ── Excel Export ──
     const exportToExcel = () => {
         if (!historicoComandas || historicoComandas.length === 0) {
-            alert('Não há dados para exportar neste mês.');
+            toast.error('Não há dados para exportar neste mês.');
             return;
         }
 
@@ -439,7 +510,7 @@ export default function Financeiro() {
     // ── PDF Export ──
     const exportToPDF = () => {
         if (!historicoComandas || historicoComandas.length === 0) {
-            alert('Não há dados para exportar neste mês.');
+            toast.error('Não há dados para exportar neste mês.');
             return;
         }
 
@@ -485,7 +556,7 @@ export default function Financeiro() {
     };
 
     const exportProfessionalExcel = (b) => {
-        if (!b.orders || b.orders.length === 0) return alert('Não há comandas para exportar.');
+        if (!b.orders || b.orders.length === 0) return toast.error('Não há comandas para exportar.');
         const dataToExport = b.orders.map(item => {
             const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatBRL(it.price)})`).join(' | ');
             return {
@@ -505,7 +576,7 @@ export default function Financeiro() {
     };
 
     const exportProfessionalPDF = (b) => {
-        if (!b.orders || b.orders.length === 0) return alert('Não há comandas para exportar.');
+        if (!b.orders || b.orders.length === 0) return toast.error('Não há comandas para exportar.');
         const doc = new jsPDF('landscape');
         doc.setFontSize(16);
         doc.text(`Relatório de Comissões - ${b.nome}`, 14, 20);
@@ -737,11 +808,17 @@ export default function Financeiro() {
 
                                 {/* ── Comissões (Cofre) ── */}
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
-                                    <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center gap-2">
-                                        <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-                                        </svg>
-                                        Comissões
+                                    <h2 className="text-base font-semibold text-slate-100 mb-4 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+                                            </svg>
+                                            Comissões
+                                        </div>
+                                        <button onClick={() => window.open('/historico-comissoes', '_blank')} className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-600/50 flex items-center gap-1.5">
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                            Ver Histórico
+                                        </button>
                                     </h2>
 
                                     {!isCommissionUnlocked ? (
@@ -797,7 +874,7 @@ export default function Financeiro() {
                                                                         </svg>
                                                                         <p className="text-sm font-semibold text-slate-200">{b.nome}</p>
                                                                     </div>
-                                                                    <button onClick={(e) => { e.stopPropagation(); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-red-600/10 text-red-500/70 border border-red-600/20 hover:bg-red-600/20 hover:text-red-500 transition-all">
+                                                                    <button onClick={(e) => { e.stopPropagation(); handlePayCommission(b); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-red-600/10 text-red-500/70 border border-red-600/20 hover:bg-red-600/20 hover:text-red-500 transition-all">
                                                                         ✓ Marcar como Pago
                                                                     </button>
                                                                 </div>
@@ -916,9 +993,15 @@ export default function Financeiro() {
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
                                         </svg>
                                         Histórico de Comandas Fechadas
-                                        <span className="text-xs font-normal text-slate-600 ml-2">Últimas {historicoComandas.length}</span>
+                                        <span className="text-xs font-normal text-slate-600 ml-2">{showAllHistorico ? `${historicoComandas.length} registros` : `Últimas ${historicoComandas.length}`}</span>
                                     </h2>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                                        <button
+                                            onClick={() => setShowAllHistorico(!showAllHistorico)}
+                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${showAllHistorico ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600/50'}`}
+                                        >
+                                            {showAllHistorico ? 'Mostrar menos' : 'Mostrar todas'}
+                                        </button>
                                         <button
                                             onClick={exportToExcel}
                                             className="px-3 py-1.5 bg-red-600/10 text-red-500 hover:bg-red-600/20 border border-red-600/20 rounded-lg text-[11px] font-semibold transition-colors flex items-center gap-1.5"
@@ -1129,6 +1212,7 @@ export default function Financeiro() {
                                             type="number"
                                             step="0.01"
                                             min="0"
+                                            max="100000"
                                             value={expenseAmount}
                                             onChange={e => setExpenseAmount(e.target.value)}
                                             onKeyDown={e => e.key === 'Enter' && handleSaveExpense()}

@@ -1,0 +1,28 @@
+{
+  "summaryData": {
+    "today": {
+      "totalHoje": 0,
+      "closedHoje": 0
+    },
+    "funnel": {
+      "open": 0,
+      "total": 77,
+      "closed": 27,
+      "no_show": 19,
+      "canceled": 13,
+      "scheduled": 18
+    },
+    "origins": {
+      "app": 9,
+      "total": 76,
+      "whatsapp": 11,
+      "reception": 56
+    },
+    "financial": {
+      "ticketMedio": 74.4186046511628,
+      "faturamentoDia": 85,
+      "faturamentoMes": 1335
+    }
+  },
+  "summaryErr": null
+}

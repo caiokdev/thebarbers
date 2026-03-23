@@ -77,41 +77,45 @@ export default function useDashboardData() {
                 const in30DaysISO = localDate(in30Days);
 
                 // --- REFATORAÇÃO: O CÉREBRO DO DASHBOARD ---
-                // Busca TODOS os agendamentos agendados para este mês
+                // Busca TODOS os agendamentos agendados para este mês (apenas colunas necessárias)
                 const { data: rawOrdersData } = await supabase
                     .from('orders')
-                    .select('*, professionals(name), clients(name, phone)')
+                    .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone)')
                     .eq('barbershop_id', bId)
-                    .gte('scheduled_at', startOfMonthISO)
-                    .lte('scheduled_at', endOfMonthISO);
+                    .or(`scheduled_at.gte.${startOfMonthISO},created_at.gte.${startOfMonthISO}`)
+                    .or(`scheduled_at.lte.${endOfMonthISO},created_at.lte.${endOfMonthISO}`);
 
-                // Busca TODOS os agendamentos FECHADOS hoje (para faturamento bater com Financeiro)
-                const { data: fechadosHojeData } = await supabase
-                    .from('orders')
-                    .select('id, total_amount, closed_at, professionals(name), clients(name)')
-                    .eq('barbershop_id', bId)
-                    .eq('status', 'closed')
-                    .gte('closed_at', startOfDayISO)
-                    .lte('closed_at', endOfDayISO);
+                // NOVO: Chama o RPC para pegar as métricas agregadas
+                const { data: summaryData, error: summaryErr } = await supabase.rpc('get_dashboard_summary', {
+                    p_b_id: bId,
+                    p_start_month: startOfMonthISO,
+                    p_end_month: endOfMonthISO,
+                    p_start_today: startOfDayISO,
+                    p_end_today: endOfDayISO,
+                    p_date_today: localDate(today)
+                });
+                if (summaryErr) console.error("Erro no RPC dashboard:", summaryErr.message);
 
                 const allOrdersRaw = rawOrdersData || [];
 
-                let openOrdersCount = 0;
-                let faturamentoDia = 0;
-                let faturamentoMes = 0;
-                let atendimentosHojeClosed = 0;
-                let atendimentosHojeTotal = 0;
+                // Usando os dados agregados do RPC para performance
+                let openOrdersCount = summaryData?.funnel?.open || 0;
+                let faturamentoDia = summaryData?.financial?.faturamentoDia || 0;
+                let faturamentoMes = summaryData?.financial?.faturamentoMes || 0;
+                let atendimentosHojeClosed = summaryData?.today?.closedHoje || 0;
+                let atendimentosHojeTotal = summaryData?.today?.totalHoje || 0;
 
-                let ordersTotal = 0;
-                let ordersApp = 0;
-                let ordersReception = 0;
+                let ordersTotal = summaryData?.origins?.total || 0;
+                let ordersApp = summaryData?.origins?.app || 0;
+                let ordersReception = summaryData?.origins?.reception || 0;
+                let ordersWhatsapp = summaryData?.origins?.whatsapp || 0;
 
-                let funnelTotal = 0;
-                let funnelClosed = 0;
-                let funnelNoShow = 0;
-                let funnelCanceled = 0;
-                let funnelScheduled = 0;
-                let funnelOpen = 0;
+                let funnelTotal = summaryData?.funnel?.total || 0;
+                let funnelClosed = summaryData?.funnel?.closed || 0;
+                let funnelNoShow = summaryData?.funnel?.no_show || 0;
+                let funnelCanceled = summaryData?.funnel?.canceled || 0;
+                let funnelScheduled = summaryData?.funnel?.scheduled || 0;
+                let funnelOpen = summaryData?.funnel?.open || 0;
 
                 const detalheFaturamentoHoje = [];
                 const detalheAtendimentosHoje = [];
@@ -129,26 +133,15 @@ export default function useDashboardData() {
                     const status = o.status;
                     const amount = parseFloat(o.total_amount || 0);
 
-                    // REGRA DE HOJE: comparar scheduled_at com data de hoje usando toLocaleDateString
+                    // REGRA DE HOJE: comparar scheduled_at com data de hoje logica simplificada
                     const isHoje = o.scheduled_at && new Date(o.scheduled_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
-
-                    const isScheduledThisMonth = true; // A query já filtrou pelo mês em scheduled_at
                     const isScheduledToday = isHoje;
-
+                    const isClosedToday = o.closed_at && new Date(o.closed_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
                     const isClosedThisMonth = status === 'closed';
-                    const isClosedToday = status === 'closed' && isHoje;
-
-                    const isCreatedThisMonth = o.created_at && o.created_at >= startOfMonthISO && o.created_at <= endOfMonthISO;
-
-                    // 1. Atendimentos Hoje (Progresso)
-                    // We will rely on fechadosHojeData for the closed count later to be accurate with checkouts.
-                    if (isScheduledToday && ['scheduled', 'confirmed', 'open', 'closed'].includes(status)) {
-                        atendimentosHojeTotal++;
-                    }
 
                     // 2. Comandas Abertas (globais, independentes do mês)
                     if (status === 'open') {
-                        openOrdersCount++;
+                        // contagem no RPC
                         const d = o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at);
                         const cDate = new Date(o.created_at);
                         detalheComandasAbertas.push({
@@ -161,39 +154,24 @@ export default function useDashboardData() {
                         });
                     }
 
-                    // 3. Faturamento Mês e Meta
+                    // 3. Faturamento Mês e Meta (O faturamento total vem do RPC, aqui é só pro gráfico da meta)
                     if (isClosedThisMonth) {
-                        faturamentoMes += amount;
-                        if (o.scheduled_at) {
-                            const dayKey = o.scheduled_at.split('T')[0];
-                            if (!dailyMetaMap[dayKey]) dailyMetaMap[dayKey] = 0;
-                            dailyMetaMap[dayKey] += amount;
-                        }
+                        const dateForMeta = o.closed_at ? new Date(o.closed_at) : (o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at));
+                        const dayKey = localDate(dateForMeta);
+                        if (!dailyMetaMap[dayKey]) dailyMetaMap[dayKey] = 0;
+                        dailyMetaMap[dayKey] += amount;
                     }
 
                     // Faturamento 7 dias
-                    if (status === 'closed' && o.scheduled_at) {
-                        const closedDateKey = o.scheduled_at.split('T')[0];
+                    if (status === 'closed') {
+                        const dateFor7Days = o.closed_at ? new Date(o.closed_at) : (o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at));
+                        const closedDateKey = localDate(dateFor7Days);
                         if (!last7DaysData[closedDateKey]) last7DaysData[closedDateKey] = 0;
                         last7DaysData[closedDateKey] += amount;
                     }
 
-                    // 4. Origens (criados neste mês)
-                    if (isCreatedThisMonth) {
-                        ordersTotal++;
-                        if (o.origin === 'app') ordersApp++;
-                        if (o.origin === 'reception') ordersReception++;
-                    }
-
-                    // 5. Funil (Agendados neste mês)
-                    if (isScheduledThisMonth) {
-                        funnelTotal++;
-                        if (status === 'closed') funnelClosed++;
-                        else if (status === 'no_show' || status === 'no-show') funnelNoShow++;
-                        else if (status === 'canceled') funnelCanceled++;
-                        else if (status === 'scheduled') funnelScheduled++;
-                        else if (status === 'open') funnelOpen++;
-
+                    // 5. Funil (Agendados neste mês) (listas visuais)
+                    if (true) {
                         const d = new Date(o.created_at || o.scheduled_at);
                         const statusLabels = { closed: 'Fechado', open: 'Aberto', scheduled: 'Agendado', 'no_show': 'No-show', canceled: 'Cancelado' };
                         const cDate = new Date(o.scheduled_at || o.created_at);
@@ -203,17 +181,20 @@ export default function useDashboardData() {
                             barbeiro: o.professionals?.name || 'Sem Barbeiro',
                             status: statusLabels[status] || status,
                             valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
-                            created_at: o.created_at
+                            _created_at: o.created_at
                         });
                     }
 
+                    const isCreatedToday = o.created_at && new Date(o.created_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
+
                     // Modal "Não Compareceu" / Cancelados DE HOJE ESTITAMENTE
-                    if (isScheduledToday) {
+                    if (isScheduledToday || isCreatedToday) {
                         if (status === 'no_show' || status === 'no-show') noShowOrdersToday.push(o);
                         if (status === 'canceled') canceledOrdersToday.push(o);
+                    }
 
-                        // 6. Próximos Atendimentos (hoje, no futuro - TIME AWARE)
-                        // A fila de próximos: status 'scheduled', agendamento de hoje, horário maior que agora.
+                    if (isScheduledToday) {
+                        // 6. Próximos Atendimentos
                         if (status === 'scheduled' && o.scheduled_at) {
                             const schedTime = new Date(o.scheduled_at).getTime();
                             if (schedTime > nowMs) {
@@ -232,29 +213,31 @@ export default function useDashboardData() {
                             }
                         }
                     }
-                });
 
-                // Atualizar Faturamento Real de Hoje e Atendimentos Fechados Hoje
-                (fechadosHojeData || []).forEach(o => {
-                    const amount = parseFloat(o.total_amount || 0);
-                    faturamentoDia += amount;
-                    atendimentosHojeClosed++;
-                    const d = new Date(o.closed_at);
-                    const pushObj = {
-                        hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
-                        cliente: o.clients?.name || 'Cliente Avulso',
-                        barbeiro: o.professionals?.name || 'Sem Barbeiro',
-                        valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
-                    };
-                    detalheFaturamentoHoje.push(pushObj);
-                    detalheAtendimentosHoje.push(pushObj);
+                    // MODALS DE ATENDIMENTOS E FATURAMENTO (Baseado no Fechamento Real)
+                    if (status === 'closed' && (isClosedToday || isScheduledToday)) {
+                        const d = o.closed_at ? new Date(o.closed_at) : new Date(o.scheduled_at);
+                        const pushObj = {
+                            _id: o.id,
+                            hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+                            cliente: o.clients?.name || 'Cliente Avulso',
+                            barbeiro: o.professionals?.name || 'Sem Barbeiro',
+                            valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
+                        };
+                        
+                        // Push into detailed views
+                        if (isClosedToday && !detalheFaturamentoHoje.find(x => x._id === o.id)) {
+                            detalheFaturamentoHoje.push(pushObj);
+                            detalheAtendimentosHoje.push(pushObj);
+                        }
+                    }
                 });
 
                 // Ordenações
                 detalheFaturamentoHoje.sort((a, b) => a.hora.localeCompare(b.hora));
                 detalheAtendimentosHoje.sort((a, b) => a.hora.localeCompare(b.hora));
                 detalheComandasAbertas.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                detalheConversaoMes.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                detalheConversaoMes.sort((a, b) => new Date(b._created_at) - new Date(a._created_at));
                 proximosAtendimentos.sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
                 // Meta Mensal Map
@@ -297,6 +280,7 @@ export default function useDashboardData() {
 
                 const appPercent = ordersTotal > 0 ? ((ordersApp / ordersTotal) * 100).toFixed(2) : '0.00';
                 const receptionPercent = ordersTotal > 0 ? ((ordersReception / ordersTotal) * 100).toFixed(2) : '0.00';
+                const whatsappPercent = ordersTotal > 0 ? ((ordersWhatsapp / ordersTotal) * 100).toFixed(2) : '0.00';
 
                 // Faturamento últimos 7 dias (limpo)
                 const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -315,16 +299,8 @@ export default function useDashboardData() {
 
                 // --- OUTRAS QUERIES (Mantidas iguais p não quebrar) ---
 
-                // NOVO: Ticket Médio (All Time Close)
-                const { data: allClosedForAvg } = await supabase
-                    .from('orders')
-                    .select('total_amount')
-                    .eq('barbershop_id', bId)
-                    .eq('status', 'closed');
-
-                const closedCount = (allClosedForAvg || []).length;
-                const closedSum = (allClosedForAvg || []).reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-                const ticketMedio = closedCount > 0 ? closedSum / closedCount : 0;
+                // Ticket Médio vem do RPC
+                const ticketMedio = summaryData?.financial?.ticketMedio || 0;
 
                 // MRR
                 const { data: activePlans } = await supabase.from('subscriptions').select('price').eq('barbershop_id', bId).eq('status', 'active');
@@ -337,8 +313,8 @@ export default function useDashboardData() {
                     supabase.from('subscriptions').select('*', { count: 'exact', head: true }).eq('barbershop_id', bId).eq('status', 'pending'),
                 ]);
 
-                // RANKING DE BARBEIROS
-                const { data: closedBarberOrders } = await supabase.from('orders').select('id, professional_id, total_amount').eq('barbershop_id', bId).eq('status', 'closed');
+                // RANKING DE BARBEIROS (APENAS ESTE MÊS PARA PERFORMANCE)
+                const { data: closedBarberOrders } = await supabase.from('orders').select('id, professional_id, total_amount').eq('barbershop_id', bId).eq('status', 'closed').gte('scheduled_at', startOfMonthISO).lte('scheduled_at', endOfMonthISO);
                 const barberOrderIds = (closedBarberOrders || []).map(o => o.id);
                 let barberOrderItems = [];
                 if (barberOrderIds.length > 0) {
@@ -386,10 +362,10 @@ export default function useDashboardData() {
                         };
                     }).sort((a, b) => b._fat - a._fat);
 
-                // Top 5 clientes
+                // Top 5 clientes (APENAS NESTE MÊS)
                 let topClientes = [];
                 try {
-                    const { data: allOrdersForClients } = await supabase.from('orders').select('id, total_amount, status, client_id').eq('barbershop_id', bId);
+                    const { data: allOrdersForClients } = await supabase.from('orders').select('id, total_amount, status, client_id').eq('barbershop_id', bId).eq('status', 'closed').gte('scheduled_at', startOfMonthISO).lte('scheduled_at', endOfMonthISO);
                     const orderIds = (allOrdersForClients || []).map(o => o.id);
                     let allOrderItems = [];
                     if (orderIds.length > 0) {
@@ -564,8 +540,20 @@ export default function useDashboardData() {
                 setData({
                     adminName,
                     adminInitials,
-                    kpis: { barbers: barbersCount || 0, openOrders: openOrdersCount || 0, clients: clientsCount || 0, errorSubs: errorSubsCount || 0, faturamentoDia, faturamentoMes, ticketMedio, activeSubsCount, mrr, atendimentosHojeClosed: atendimentosHojeClosed || 0, atendimentosHojeTotal: atendimentosHojeTotal || 0 },
-                    origins: { total: ordersTotal || 0, app: ordersApp || 0, appPercent, reception: ordersReception || 0, receptionPercent },
+                    kpis: { 
+                        barbers: barbersCount || 0, 
+                        openOrders: detalheComandasAbertas.length, 
+                        clients: clientsCount || 0, 
+                        errorSubs: errorSubsCount || 0, 
+                        faturamentoDia, 
+                        faturamentoMes, 
+                        ticketMedio, 
+                        activeSubsCount, 
+                        mrr, 
+                        atendimentosHojeClosed: detalheAtendimentosHoje.length, 
+                        atendimentosHojeTotal: allOrdersRaw.filter(o => o.scheduled_at && new Date(o.scheduled_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR')).length 
+                    },
+                    origins: { total: ordersTotal || 0, app: ordersApp || 0, appPercent, reception: ordersReception || 0, receptionPercent, whatsapp: ordersWhatsapp || 0, whatsappPercent },
                     contracts: { expiring: expiringContracts || 0, pending: pendingContracts || 0 },
                     funnel,
                     clientesEvasao,

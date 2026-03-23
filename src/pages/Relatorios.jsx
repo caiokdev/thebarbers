@@ -156,7 +156,7 @@ export default function Relatorios() {
     const [totalVisitasMapState, setTotalVisitasMapState] = useState({});
 
     // ── Origem dos Agendamentos ──
-    const [origemData, setOrigemData] = useState({ total: 0, app: 0, reception: 0 });
+    const [origemData, setOrigemData] = useState({ total: 0, app: 0, reception: 0, whatsapp: 0 });
 
     // ── Modal Drill-Down ──
     const [detailsModal, setDetailsModal] = useState({ open: false, type: '', title: '', data: [] });
@@ -444,7 +444,8 @@ export default function Relatorios() {
                 const origemAll = allMonthOrdersForOrigin || [];
                 const origemApp = origemAll.filter(o => o.origin === 'app').length;
                 const origemRecepcao = origemAll.filter(o => o.origin === 'reception').length;
-                setOrigemData({ total: origemAll.length, app: origemApp, reception: origemRecepcao });
+                const origemWhatsapp = origemAll.filter(o => o.origin === 'whatsapp').length;
+                setOrigemData({ total: origemAll.length, app: origemApp, reception: origemRecepcao, whatsapp: origemWhatsapp });
 
                 // ═══ Lift data for drill-down modal ═══
                 setOrdersDoMes(currentMonthOrders);
@@ -655,7 +656,7 @@ export default function Relatorios() {
                                                 <BarChart data={monthlyRevenue} barGap={2}>
                                                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                                                     <XAxis dataKey="mes" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
+                                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => v >= 1000 ? `R$${(v / 1000).toFixed(1).replace('.0', '')}k` : `R$${v}`} />
                                                     <Tooltip content={<CustomTooltip />} />
                                                     <Bar dataKey="entradas" name="entradas" fill="#34d399" radius={[4, 4, 0, 0]} />
                                                     <Bar dataKey="saidas" name="saidas" fill="#f87171" radius={[4, 4, 0, 0]} />
@@ -797,6 +798,31 @@ export default function Relatorios() {
                                                                 <div
                                                                     className="h-2.5 rounded-full bg-blue-500 transition-all duration-500"
                                                                     style={{ width: `${Math.min(recPct, 100)}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+
+                                                {/* WhatsApp */}
+                                                {(() => {
+                                                    const waPct = origemData.total > 0 ? ((origemData.whatsapp / origemData.total) * 100) : 0;
+                                                    return (
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-1.5">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                                                                    <span className="text-sm text-slate-300 font-medium">WhatsApp</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-sm font-bold text-emerald-500">{origemData.whatsapp}</span>
+                                                                    <span className="text-xs text-slate-500">({waPct.toFixed(1)}%)</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="w-full bg-slate-900 rounded-full h-2.5">
+                                                                <div
+                                                                    className="h-2.5 rounded-full bg-emerald-500 transition-all duration-500"
+                                                                    style={{ width: `${Math.min(waPct, 100)}%` }}
                                                                 />
                                                             </div>
                                                         </div>

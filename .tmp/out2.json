@@ -1,0 +1,18 @@
+[
+  {
+    "rel": "profiles(name)",
+    "res": "Could not find a relationship between 'orders' and 'profiles' in the schema cache"
+  },
+  {
+    "rel": "profiles!professional_id(name)",
+    "res": "Could not find a relationship between 'orders' and 'profiles' in the schema cache"
+  },
+  {
+    "rel": "profiles!orders_professional_id_fkey(name)",
+    "res": "Could not find a relationship between 'orders' and 'profiles' in the schema cache"
+  },
+  {
+    "rel": "professionals(name)",
+    "res": "SUCCESS"
+  }
+]

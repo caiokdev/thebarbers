@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 
@@ -197,13 +198,13 @@ export default function Agenda() {
 
         const { data } = await supabase
             .from('orders')
-            .select('id, professional_id, client_id, scheduled_at, total_amount, status')
+            .select('id, professional_id, client_id, scheduled_at, total_amount, status, origin, notes')
             .eq('barbershop_id', barbershopId)
             .gte('scheduled_at', startOfDay)
             .lte('scheduled_at', endOfDay)
             .in('status', ['scheduled', 'confirmed', 'open', 'no_show']);
 
-        setAppointments(data || []);
+        setAppointments((data || []).filter(o => !o.notes?.includes('[HIDDEN_FROM_AGENDA]')));
     }, [barbershopId, selectedDate]);
 
     useEffect(() => {
@@ -296,6 +297,29 @@ export default function Agenda() {
     const openModalEmpty = () => { setSelectedSlot({ professionalId: '', time: '' }); setIsModalOpen(true); };
     const openModalFromCell = (professionalId, time) => { setSelectedSlot({ professionalId, time }); setIsModalOpen(true); };
     const openDetailsModal = (order) => { setSelectedOrderDetails(order); setIsDetailsModalOpen(true); };
+
+    // ── Subscription Refund Helper ──
+    const refundOrderServices = async (orderId, clientId) => {
+        const client = clients.find(c => c.id === clientId);
+        if (!client || !client.is_subscriber) return;
+        const { data: items } = await supabase.from('order_items').select('*').eq('order_id', orderId);
+        if (!items || items.length === 0) return;
+        let c_refund = 0, b_refund = 0;
+        items.forEach(itm => {
+            const n = (itm.name || '').toLowerCase();
+            if (n.includes('corte') || n.includes('cabelo')) c_refund += itm.quantity;
+            if (n.includes('barba')) b_refund += itm.quantity;
+        });
+        if (c_refund > 0 || b_refund > 0) {
+            const { data: sub } = await supabase.from('client_subscriptions').select('*').eq('client_id', clientId).single();
+            if (sub) {
+                await supabase.from('client_subscriptions').update({
+                    haircuts_used: Math.max(0, (sub.haircuts_used || 0) - c_refund),
+                    shaves_used: Math.max(0, (sub.shaves_used || 0) - b_refund)
+                }).eq('id', sub.id);
+            }
+        }
+    };
 
     return (
         <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
@@ -497,33 +521,50 @@ export default function Agenda() {
                     proMap={proMap}
                     onClose={() => { setIsDetailsModalOpen(false); setSelectedOrderDetails(null); }}
                     onDelete={async () => {
-                        const { error } = await supabase
-                            .from('orders')
-                            .delete()
-                            .eq('id', selectedOrderDetails.id);
-                        if (error) { alert(`Erro ao excluir: ${error.message}`); return; }
+                        if (!['canceled', 'no_show'].includes(selectedOrderDetails.status)) {
+                            await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
+                        }
+                        
+                        if (selectedOrderDetails.status === 'no_show') {
+                            const newNotes = selectedOrderDetails.notes ? selectedOrderDetails.notes + '\n[HIDDEN_FROM_AGENDA]' : '[HIDDEN_FROM_AGENDA]';
+                            const { error } = await supabase
+                                .from('orders')
+                                .update({ notes: newNotes })
+                                .eq('id', selectedOrderDetails.id);
+                            if (error) { toast.error(`Erro ao ocultar: ${error.message}`); return; }
+                            toast.success('Falta ocultada da agenda!');
+                        } else {
+                            const { error } = await supabase
+                                .from('orders')
+                                .delete()
+                                .eq('id', selectedOrderDetails.id);
+                            if (error) { toast.error(`Erro ao excluir: ${error.message}`); return; }
+                            toast.success('Agendamento excluído com sucesso.');
+                        }
+                        
                         setIsDetailsModalOpen(false);
                         setSelectedOrderDetails(null);
                         fetchAppointments();
-                        alert('Agendamento excluído com sucesso.');
                     }}
                     onCancel={async () => {
+                        await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
                         const { error } = await supabase
                             .from('orders')
                             .update({ status: 'canceled' })
                             .eq('id', selectedOrderDetails.id);
-                        if (error) { alert(`Erro ao cancelar: ${error.message}`); return; }
+                        if (error) { toast.error(`Erro ao cancelar: ${error.message}`); return; }
                         setIsDetailsModalOpen(false);
                         setSelectedOrderDetails(null);
                         fetchAppointments();
-                        alert('Agendamento cancelado com sucesso.');
+                        toast.success('Agendamento cancelado com sucesso.');
                     }}
                     onNoShow={async () => {
+                        await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
                         const { error } = await supabase
                             .from('orders')
                             .update({ status: 'no_show' })
                             .eq('id', selectedOrderDetails.id);
-                        if (error) { alert(`Erro ao marcar falta: ${error.message}`); return; }
+                        if (error) { toast.error(`Erro ao marcar falta: ${error.message}`); return; }
 
                         try {
                             // Buscar estado real-time para evitar bloqueios de state stale
@@ -554,14 +595,14 @@ export default function Agenda() {
                         setIsDetailsModalOpen(false);
                         setSelectedOrderDetails(null);
                         fetchAppointments();
-                        alert('Cliente marcado como Não Compareceu.');
+                        toast.success('Cliente marcado como Não Compareceu.');
                     }}
                     onOpenComanda={async () => {
                         const { error } = await supabase
                             .from('orders')
                             .update({ status: 'open' })
                             .eq('id', selectedOrderDetails.id);
-                        if (error) { alert(`Erro ao abrir comanda: ${error.message}`); return; }
+                        if (error) { toast.error(`Erro ao abrir comanda: ${error.message}`); return; }
                         setIsDetailsModalOpen(false);
                         setSelectedOrderDetails(null);
                         fetchAppointments();
@@ -595,6 +636,10 @@ function AppointmentModal({
     const [avulsoNotes, setAvulsoNotes] = useState('');
     const [origin, setOrigin] = useState('reception');
 
+    // Subscriber plan for selected client
+    const [clientSub, setClientSub] = useState(null);
+    const [subLoading, setSubLoading] = useState(false);
+
     // Client search
     const filteredClients = useMemo(() => {
         if (!clientSearch.trim()) return clients.slice(0, 8);
@@ -602,13 +647,38 @@ function AppointmentModal({
         return clients.filter(c => c.name?.toLowerCase().includes(q)).slice(0, 8);
     }, [clientSearch, clients]);
 
+    // Fetch subscription when client changes
+    useEffect(() => {
+        if (!clientId) { setClientSub(null); return; }
+        const clientObj = clients.find(c => c.id === clientId);
+        if (!clientObj?.is_subscriber) { setClientSub(null); return; }
+        setSubLoading(true);
+        supabase
+            .from('client_subscriptions')
+            .select('*, plans(name, haircut_limit, shave_limit)')
+            .eq('client_id', clientId)
+            .single()
+            .then(async ({ data }) => {
+                if (data && !data.plans && data.plan_id) {
+                    // plans join failed — fallback: fetch plan directly
+                    const { data: planData } = await supabase
+                        .from('plans')
+                        .select('name, haircut_limit, shave_limit')
+                        .eq('id', data.plan_id)
+                        .single();
+                    if (planData) data.plans = planData;
+                }
+                setClientSub(data || null);
+                setSubLoading(false);
+            });
+    }, [clientId, clients]);
+
     // Total
     const totalAmount = useMemo(() => {
         if (isAvulso) return parseFloat(avulsoValue) || 0;
         return cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
     }, [cartItems, isAvulso, avulsoValue]);
 
-    // Cart operations
     const addToCart = (catalogId) => {
         if (!catalogId) return;
         const item = catalog.find(c => c.id === catalogId);
@@ -617,16 +687,59 @@ function AppointmentModal({
         // Stock validation for products
         if (item.type === 'product') {
             if ((item.current_stock ?? 0) <= 0) {
-                alert('Produto esgotado! Não é possível adicionar.');
+                toast.error('Produto esgotado! Não é possível adicionar.');
                 setCatalogSelect('');
                 return;
             }
             const existingInCart = cartItems.find(ci => ci.id === item.id);
             const currentQtyInCart = existingInCart ? existingInCart.quantity : 0;
             if (currentQtyInCart + 1 > item.current_stock) {
-                alert(`Estoque insuficiente. Apenas ${item.current_stock} unidades disponíveis de "${item.name}".`);
+                toast.error(`Estoque insuficiente. Apenas ${item.current_stock} unidades disponíveis de "${item.name}".`);
                 setCatalogSelect('');
                 return;
+            }
+        }
+
+        // ── Plan restriction for services ──
+        if (item.type === 'service' && clientSub) {
+            const n = (item.name || '').toLowerCase();
+            const isHaircut = n.includes('corte') || n.includes('cabelo');
+            const isShave   = n.includes('barba');
+
+            if (isHaircut) {
+                const limit = clientSub.plans?.haircut_limit ?? 999;
+                if (limit === 0) {
+                    toast.error(`❌ Corte não incluso no "${clientSub.plans?.name || 'plano'}" deste cliente.`);
+                    setCatalogSelect('');
+                    return;
+                }
+                const usedInCart = cartItems.filter(ci => {
+                    const cn = (ci.name || '').toLowerCase();
+                    return ci.type === 'service' && (cn.includes('corte') || cn.includes('cabelo'));
+                }).reduce((s, ci) => s + ci.quantity, 0);
+                if ((clientSub.haircuts_used || 0) + usedInCart >= limit) {
+                    toast.error(`❌ Limite de cortes do plano atingido (${clientSub.haircuts_used}/${limit} já usados).`);
+                    setCatalogSelect('');
+                    return;
+                }
+            }
+
+            if (isShave) {
+                const limit = clientSub.plans?.shave_limit ?? 999;
+                if (limit === 0) {
+                    toast.error(`❌ Barba não inclusa no "${clientSub.plans?.name || 'plano'}" deste cliente.`);
+                    setCatalogSelect('');
+                    return;
+                }
+                const usedInCart = cartItems.filter(ci => {
+                    const cn = (ci.name || '').toLowerCase();
+                    return ci.type === 'service' && cn.includes('barba');
+                }).reduce((s, ci) => s + ci.quantity, 0);
+                if ((clientSub.shaves_used || 0) + usedInCart >= limit) {
+                    toast.error(`❌ Limite de barbas do plano atingido (${clientSub.shaves_used}/${limit} já usados).`);
+                    setCatalogSelect('');
+                    return;
+                }
             }
         }
 
@@ -649,7 +762,7 @@ function AppointmentModal({
                 if (delta > 0 && ci.type === 'product') {
                     const catItem = catalog.find(c => c.id === ci.id);
                     if (catItem && newQty > (catItem.current_stock ?? 0)) {
-                        alert(`Estoque insuficiente. Apenas ${catItem.current_stock} unidades disponíveis de "${ci.name}".`);
+                        toast.error(`Estoque insuficiente. Apenas ${catItem.current_stock} unidades disponíveis de "${ci.name}".`);
                         return ci;
                     }
                 }
@@ -659,21 +772,42 @@ function AppointmentModal({
         );
     };
 
-    const selectClient = (c) => {
+    const selectClient = async (c) => {
         setClientId(c.id);
         setClientSearch(c.name);
         setShowClientDropdown(false);
+
+        if (c.is_subscriber) {
+            const { data: sub } = await supabase.from('client_subscriptions').select('*, plans(haircut_limit, shave_limit)').eq('client_id', c.id).single();
+            if (sub) {
+                let remainC = (sub.plans?.haircut_limit ?? 999) - (sub.haircuts_used || 0);
+                let remainB = (sub.plans?.shave_limit ?? 999) - (sub.shaves_used || 0);
+                
+                setCartItems(prev => {
+                    let newCart = prev.filter(item => !item.name.includes('(Plano)') && !item.name.includes('do Plano'));
+                    if (remainC > 0 && remainB > 0) {
+                        newCart.push({ id: 'plano-corte', type: 'service', name: 'Corte do Plano', price: 0, quantity: 1 });
+                        newCart.push({ id: 'plano-barba', type: 'service', name: 'Barba do Plano', price: 0, quantity: 1 });
+                    } else if (remainC > 0) {
+                        newCart.push({ id: 'plano-corte', type: 'service', name: 'Corte do Plano', price: 0, quantity: 1 });
+                    } else if (remainB > 0) {
+                        newCart.push({ id: 'plano-barba', type: 'service', name: 'Barba do Plano', price: 0, quantity: 1 });
+                    }
+                    return newCart;
+                });
+            }
+        }
     };
 
     // ── SAVE to Supabase ──
     const handleSave = async () => {
         if (!professionalId || !date || !time) {
-            alert('Preencha os campos obrigatórios (Profissional, Data e Horário).');
+            toast.error('Preencha os campos obrigatórios (Profissional, Data e Horário).');
             return;
         }
 
         if (!isAvulso && !clientId) {
-            alert('Selecione um cliente válido (pesquise e clique na lista) ou marque como Serviço Avulso.');
+            toast.error('Selecione um cliente válido (pesquise e clique na lista) ou marque como Serviço Avulso.');
             return;
         }
 
@@ -698,7 +832,7 @@ function AppointmentModal({
         });
 
         if (conflict) {
-            alert('Este profissional já possui um agendamento neste horário.');
+            toast.error('Este profissional já possui um agendamento neste horário.');
             return;
         }
 
@@ -725,7 +859,7 @@ function AppointmentModal({
 
             if (orderError) {
                 console.error('Erro no Supabase:', orderError);
-                alert('Erro ao salvar no banco: ' + orderError.message);
+                toast.error('Erro ao salvar no banco: ' + orderError.message);
                 setSaving(false);
                 return;
             }
@@ -745,11 +879,43 @@ function AppointmentModal({
                     .insert(items);
 
                 if (itemsError) throw itemsError;
+
+                // ── DEDUCT Subscription Usages (plan-aware) ──
+                const clientObj = clients.find(c => c.id === clientId);
+                if (clientObj?.is_subscriber) {
+                    let cortes_used = 0, barbas_used = 0;
+                    cartItems.forEach(ci => {
+                        const n = (ci.name || '').toLowerCase();
+                        if (n.includes('corte') || n.includes('cabelo')) cortes_used += ci.quantity;
+                        if (n.includes('barba')) barbas_used += ci.quantity;
+                    });
+                    if (cortes_used > 0 || barbas_used > 0) {
+                        // Fetch subscription WITH plan limits
+                        const { data: sub } = await supabase
+                            .from('client_subscriptions')
+                            .select('*, plans(haircut_limit, shave_limit)')
+                            .eq('client_id', clientId)
+                            .single();
+                        if (sub) {
+                            const haircutLimit = sub.plans?.haircut_limit ?? 999;
+                            const shaveLimit   = sub.plans?.shave_limit   ?? 999;
+                            // Only count services that the plan actually includes
+                            const effectiveCortes = haircutLimit > 0 ? cortes_used : 0;
+                            const effectiveBarbas = shaveLimit   > 0 ? barbas_used : 0;
+                            if (effectiveCortes > 0 || effectiveBarbas > 0) {
+                                await supabase.from('client_subscriptions').update({
+                                    haircuts_used: (sub.haircuts_used || 0) + effectiveCortes,
+                                    shaves_used:   (sub.shaves_used   || 0) + effectiveBarbas
+                                }).eq('id', sub.id);
+                            }
+                        }
+                    }
+                }
             }
 
             onSaved();
         } catch (err) {
-            alert(`Erro ao salvar: ${err.message}`);
+            toast.error(`Erro ao salvar: ${err.message}`);
         } finally {
             setSaving(false);
         }
@@ -812,13 +978,39 @@ function AppointmentModal({
                         {clientId && (
                             <div className="absolute right-3 top-9 text-xs text-red-500">✓</div>
                         )}
+                        {/* Client dropdown */}
                         {showClientDropdown && filteredClients.length > 0 && !clientId && (
                             <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl shadow-black/40 max-h-48 overflow-y-auto">
                                 {filteredClients.map(c => (
                                     <button key={c.id} onClick={() => selectClient(c)} className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors">
-                                        {c.name}
+                                        <span>{c.name}</span>
+                                        {c.is_subscriber && (
+                                            <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#111', color: '#B59410', boxShadow: '0 0 0 1px rgba(181,148,16,0.4)' }}>★ Assinante</span>
+                                        )}
                                     </button>
                                 ))}
+                            </div>
+                        )}
+
+                        {/* Plan info banner for subscriber */}
+                        {clientId && subLoading && (
+                            <p className="text-xs text-slate-500 mt-2">Carregando plano...</p>
+                        )}
+                        {clientId && !subLoading && clientSub && (
+                            <div className="mt-2 px-4 py-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-start gap-3">
+                                <span className="text-yellow-400 text-base font-bold flex-shrink-0">★</span>
+                                <div>
+                                    <p className="text-xs font-bold text-yellow-300">{clientSub.plans?.name || 'Plano ativo'}</p>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">
+                                        {clientSub.plans?.haircut_limit > 0
+                                            ? `Cortes: ${clientSub.haircuts_used}/${clientSub.plans.haircut_limit}`
+                                            : 'Sem cortes no plano'}
+                                        {' · '}
+                                        {clientSub.plans?.shave_limit > 0
+                                            ? `Barbas: ${clientSub.shaves_used}/${clientSub.plans.shave_limit}`
+                                            : 'Sem barba no plano'}
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -855,6 +1047,7 @@ function AppointmentModal({
                                     type="number"
                                     step="0.01"
                                     min="0"
+                                    max="10000"
                                     value={avulsoValue}
                                     onChange={e => setAvulsoValue(e.target.value)}
                                     placeholder="0,00"
@@ -972,6 +1165,14 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCanc
     const clientName = clientMap[order.client_id] || 'Cliente';
     const proName = proMap[order.professional_id] || 'Profissional';
 
+    const originMap = {
+        'reception': 'Recepção',
+        'app': 'Aplicativo',
+        'whatsapp': 'WhatsApp',
+        'phone': 'Telefone',
+    };
+    const originStr = originMap[order.origin] || 'Não informada';
+
     const handleCancel = async () => {
         if (!confirm('Tem certeza que deseja cancelar este agendamento?')) return;
         setActionLoading(true);
@@ -1042,6 +1243,10 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCanc
                         <p className="text-sm font-semibold text-slate-100">{proName}</p>
                     </div>
                     <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Origem</p>
+                        <p className="text-sm font-semibold text-slate-100 capitalize">{originStr}</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50 col-span-2">
                         <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Valor</p>
                         <p className="text-sm font-bold text-red-500">{formatCurrency(order.total_amount)}</p>
                     </div>
@@ -1054,10 +1259,22 @@ function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCanc
 
                 {/* Actions */}
                 {['canceled', 'closed', 'no_show'].includes(order.status) ? (
-                    <div className="pt-4 border-t border-slate-700">
+                    <div className="pt-4 border-t border-slate-700 space-y-3">
                         <p className="text-center text-sm text-slate-500 italic">
                             {order.status === 'no_show' ? '⚠️ Cliente não compareceu a este agendamento.' : 'Nenhuma ação disponível para este status.'}
                         </p>
+                        {order.status === 'no_show' && (
+                            <button
+                                onClick={handleDelete}
+                                disabled={actionLoading}
+                                className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors text-white bg-rose-500 hover:bg-rose-600 shadow-lg shadow-rose-500/20 disabled:opacity-50"
+                            >
+                                {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                )}
+                                Excluir Agendamento
+                            </button>
+                        )}
                     </div>
                 ) : (
                     <div className="space-y-3 pt-4 border-t border-slate-700">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -195,7 +196,7 @@ export default function AgendamentoPublico() {
     // ════════════════ SUBMIT ════════════════
     const handleSubmit = async () => {
         if (!clientName.trim() || !clientPhone.trim()) {
-            alert('Preencha seu nome e WhatsApp.');
+            toast.error('Preencha seu nome e WhatsApp.');
             return;
         }
         setSaving(true);
@@ -270,7 +271,7 @@ export default function AgendamentoPublico() {
 
             if (orderError) {
                 console.error('Erro no Supabase:', orderError);
-                alert('Erro ao salvar no banco: ' + orderError.message);
+                toast.error('Erro ao salvar no banco: ' + orderError.message);
                 setSaving(false);
                 return;
             }
@@ -286,11 +287,32 @@ export default function AgendamentoPublico() {
                 }));
                 const { error: itemsError } = await supabase.from('order_items').insert(items);
                 if (itemsError) throw itemsError;
+
+                // ── DEDUCT Subscription Usages ──
+                const { data: clientObj } = await supabase.from('clients').select('is_subscriber').eq('id', clientId).single();
+                if (clientObj?.is_subscriber) {
+                    let cortes_used = 0, barbas_used = 0;
+                    selectedServices.forEach(svc => {
+                        const n = (svc.name || '').toLowerCase();
+                        if (n.includes('corte') || n.includes('cabelo')) cortes_used += 1;
+                        if (n.includes('barba')) barbas_used += 1;
+                    });
+                    
+                    if (cortes_used > 0 || barbas_used > 0) {
+                        const { data: sub } = await supabase.from('client_subscriptions').select('*').eq('client_id', clientId).single();
+                        if (sub) {
+                            await supabase.from('client_subscriptions').update({
+                                haircuts_used: (sub.haircuts_used || 0) + cortes_used,
+                                shaves_used: (sub.shaves_used || 0) + barbas_used
+                            }).eq('id', sub.id);
+                        }
+                    }
+                }
             }
 
             setSuccess(true);
         } catch (err) {
-            alert(`Erro ao agendar: ${err.message}`);
+            toast.error(`Erro ao agendar: ${err.message}`);
         } finally {
             setSaving(false);
         }

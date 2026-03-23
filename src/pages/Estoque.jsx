@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 
@@ -213,7 +214,7 @@ export default function Estoque() {
             setEditingProduct(null);
             fetchData();
         } catch (err) {
-            alert(`Erro ao salvar: ${err.message}`);
+            toast.error(`Erro ao salvar: ${err.message}`);
         } finally {
             setSavingProduct(false);
         }
@@ -221,7 +222,7 @@ export default function Estoque() {
 
     // ── New product handler ──
     const handleCreateProduct = async () => {
-        if (!newProduct.name.trim()) { alert('Nome é obrigatório.'); return; }
+        if (!newProduct.name.trim()) { toast.error('Nome é obrigatório.'); return; }
         setSavingNewProduct(true);
         try {
             const { error } = await supabase.from('products').insert({
@@ -237,7 +238,7 @@ export default function Estoque() {
             setNewProduct({ name: '', price: '', current_stock: '', min_stock: '', repurchase_days: 30 });
             fetchData();
         } catch (err) {
-            alert(`Erro ao criar produto: ${err.message}`);
+            toast.error(`Erro ao criar produto: ${err.message}`);
         } finally {
             setSavingNewProduct(false);
         }
@@ -574,6 +575,7 @@ export default function Estoque() {
                                     <input
                                         type="number"
                                         min="0"
+                                        max="10000"
                                         value={editCurrentStock}
                                         onChange={e => setEditCurrentStock(parseInt(e.target.value) || 0)}
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
@@ -584,6 +586,7 @@ export default function Estoque() {
                                     <input
                                         type="number"
                                         min="0"
+                                        max="10000"
                                         value={editMinStock}
                                         onChange={e => setEditMinStock(parseInt(e.target.value) || 0)}
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
@@ -659,6 +662,7 @@ export default function Estoque() {
                                     type="number"
                                     step="0.01"
                                     min="0"
+                                    max="10000"
                                     value={newProduct.price}
                                     onChange={e => setNewProduct(p => ({ ...p, price: e.target.value }))}
                                     placeholder="0,00"
@@ -672,8 +676,9 @@ export default function Estoque() {
                                     <input
                                         type="number"
                                         min="0"
+                                        max="10000"
                                         value={newProduct.current_stock}
-                                        onChange={e => setNewProduct(p => ({ ...p, current_stock: e.target.value }))}
+                                        onChange={e => setNewProduct(p => ({ ...p, current_stock: parseInt(e.target.value) || 0 }))}
                                         placeholder="0"
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                     />
@@ -683,8 +688,9 @@ export default function Estoque() {
                                     <input
                                         type="number"
                                         min="0"
+                                        max="10000"
                                         value={newProduct.min_stock}
-                                        onChange={e => setNewProduct(p => ({ ...p, min_stock: e.target.value }))}
+                                        onChange={e => setNewProduct(p => ({ ...p, min_stock: parseInt(e.target.value) || 0 }))}
                                         placeholder="0"
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
                                     />

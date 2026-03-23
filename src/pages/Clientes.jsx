@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import Sidebar from '../components/Sidebar';
 import * as XLSX from 'xlsx';
@@ -155,8 +156,8 @@ export default function Clientes() {
 
     // ── Save new client ──
     const handleSaveClient = async () => {
-        if (!newName.trim()) return alert('Nome é obrigatório.');
-        if (newIsSub && !newSelectedPlanId) return alert('Selecione um plano para o assinante.');
+        if (!newName.trim()) return toast.error('Nome é obrigatório.');
+        if (newIsSub && !newSelectedPlanId) return toast.error('Selecione um plano para o assinante.');
         setSaving(true);
         try {
             const { data: newClientData, error } = await supabase.from('clients').insert({
@@ -211,7 +212,7 @@ export default function Clientes() {
                 });
             }
         } catch (err) {
-            alert('Erro ao salvar: ' + err.message);
+            toast.error('Erro ao salvar: ' + err.message);
         } finally {
             setSaving(false);
         }
@@ -264,7 +265,7 @@ export default function Clientes() {
 
     // ── Update Client Profile ──
     const handleUpdateClientProfile = async () => {
-        if (!editName.trim()) return alert('Nome é obrigatório.');
+        if (!editName.trim()) return toast.error('Nome é obrigatório.');
 
         try {
             const { error } = await supabase
@@ -292,7 +293,7 @@ export default function Clientes() {
 
             setIsEditingProfile(false);
         } catch (err) {
-            alert('Erro ao atualizar perfil: ' + err.message);
+            toast.error('Erro ao atualizar perfil: ' + err.message);
         }
     };
 
@@ -313,7 +314,7 @@ export default function Clientes() {
             setProfileModal({ open: false, client: null, orders: [] });
             fetchClientes();
         } catch (err) {
-            alert('Erro ao excluir cliente: ' + err.message);
+            toast.error('Erro ao excluir cliente: ' + err.message);
         }
     };
 
@@ -342,7 +343,7 @@ export default function Clientes() {
             }));
             fetchClientes();
         } catch (err) {
-            alert('Erro ao remover assinatura: ' + err.message);
+            toast.error('Erro ao remover assinatura: ' + err.message);
         }
     };
 
@@ -404,7 +405,7 @@ export default function Clientes() {
             setCardInfo({ name: '', number: '', exp: '', cvv: '' });
             setIsCardSectionOpen(false);
         } catch (err) {
-            alert('Erro ao vincular plano: ' + err.message);
+            toast.error('Erro ao vincular plano: ' + err.message);
         }
     };
 
@@ -412,11 +413,19 @@ export default function Clientes() {
     const handleTogglePaymentStatus = async (clientId, currentSubStatus) => {
         const newStatus = currentSubStatus === 'active' ? 'overdue' : 'active';
         try {
-            const { error } = await supabase
+            // 1. Update clients table
+            const { error: clientErr } = await supabase
                 .from('clients')
                 .update({ subscription_status: newStatus })
                 .eq('id', clientId);
-            if (error) throw error;
+            if (clientErr) throw clientErr;
+
+            // 2. Update client_subscriptions table to keep them in sync
+            const { error: subErr } = await supabase
+                .from('client_subscriptions')
+                .update({ status: newStatus })
+                .eq('client_id', clientId);
+            if (subErr) throw subErr;
 
             // Update modal state instantly
             setProfileModal(prev => ({
@@ -429,14 +438,14 @@ export default function Clientes() {
                 prev.map(c => c.id === clientId ? { ...c, subscriptionStatus: newStatus } : c)
             );
         } catch (err) {
-            alert('Erro ao atualizar status: ' + err.message);
+            toast.error('Erro ao atualizar status: ' + err.message);
         }
     };
 
     // ── Excel Export ──
     const exportToExcel = () => {
         if (!filteredClientes || filteredClientes.length === 0) {
-            alert('Não há clientes para exportar com os filtros atuais.');
+            toast.error('Não há clientes para exportar com os filtros atuais.');
             return;
         }
 
@@ -459,7 +468,7 @@ export default function Clientes() {
     // ── PDF Export ──
     const exportToPDF = () => {
         if (!filteredClientes || filteredClientes.length === 0) {
-            alert('Não há clientes para exportar com os filtros atuais.');
+            toast.error('Não há clientes para exportar com os filtros atuais.');
             return;
         }
 

@@ -1,0 +1,1 @@
+["id","barbershop_id","client_id","status","origin","total_amount","created_at","professional_id","closed_at","scheduled_at","payment_method","reminder_sent","reminder_failed","reminder_error_log","notes","noshow_sent","noshow_failed","noshow_error_log","feedback_sent","feedback_failed","feedback_error_log","rebook_sent","rebook_failed","rebook_error_log"]

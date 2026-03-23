@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
@@ -162,37 +163,43 @@ export default function Dashboard() {
     const handleCancelOrder = async (order) => {
         try {
             await supabase.from('orders').update({ status: 'canceled' }).eq('id', order.id);
-            alert('Agendamento cancelado com sucesso!');
+            toast.success('Agendamento cancelado com sucesso!');
             setSelectedOrder(null);
             window.dispatchEvent(new Event('focus'));
-        } catch (e) { alert('Erro ao cancelar agendamento.'); }
+        } catch (e) { toast.error('Erro ao cancelar agendamento.'); }
     };
 
     const handleNoShowOrder = async (order) => {
         try {
             await supabase.from('orders').update({ status: 'no_show' }).eq('id', order.id);
-            alert('Cliente marcado como falta!');
+            toast.success('Cliente marcado como falta!');
             setSelectedOrder(null);
             window.dispatchEvent(new Event('focus'));
-        } catch (e) { alert('Erro ao registrar falta.'); }
+        } catch (e) { toast.error('Erro ao registrar falta.'); }
     };
 
     const handleOpenComanda = async (order) => {
         try {
             await supabase.from('orders').update({ status: 'open' }).eq('id', order.id);
-            alert('Comanda aberta com sucesso!');
+            toast.success('Comanda aberta com sucesso!');
             setSelectedOrder(null);
             window.dispatchEvent(new Event('focus'));
-        } catch (e) { alert('Erro ao abrir comanda.'); }
+        } catch (e) { toast.error('Erro ao abrir comanda.'); }
     };
 
     const handleDeleteOrder = async (order) => {
         try {
-            await supabase.from('orders').delete().eq('id', order.id);
-            alert('Agendamento excluído da base!');
+            if (order.status === 'no_show') {
+                const newNotes = order.notes ? order.notes + '\n[HIDDEN_FROM_AGENDA]' : '[HIDDEN_FROM_AGENDA]';
+                await supabase.from('orders').update({ notes: newNotes }).eq('id', order.id);
+                toast.success('Falta ocultada da agenda visualmente!');
+            } else {
+                await supabase.from('orders').delete().eq('id', order.id);
+                toast.success('Agendamento excluído da base!');
+            }
             setSelectedOrder(null);
             window.dispatchEvent(new Event('focus'));
-        } catch (e) { alert('Erro ao excluir agendamento.'); }
+        } catch (e) { toast.error('Erro ao excluir agendamento.'); }
     };
 
     function openDrawer(type) {
@@ -317,7 +324,7 @@ export default function Dashboard() {
                     {/* ─── BLOCO 1 : KPIs PRINCIPAIS (Clickable → Drawer) ─── */}
                     <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
                         <KpiCard
-                            icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V7m0 10v1" /></svg>}
+                            icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                             value={formatBRL(data.kpis.faturamentoDia)}
                             label="Faturamento Hoje"
                             badge="+12% vs ontem"
@@ -359,12 +366,16 @@ export default function Dashboard() {
                             {/* Card A: Origem dos Agendamentos */}
                             <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
                                 <h2 className="text-base font-semibold text-slate-100 mb-5">Origem dos Agendamentos</h2>
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div className="text-center">
+                                <div className="grid grid-cols-4 gap-4">
+                                    <div className="text-center border-r border-slate-700">
                                         <p className="text-3xl font-bold text-slate-100">{data.origins.total}</p>
                                         <p className="text-xs text-slate-400 mt-1">Total</p>
                                     </div>
-                                    <div className="text-center border-l border-r border-slate-700">
+                                    <div className="text-center border-r border-slate-700">
+                                        <p className="text-3xl font-bold text-emerald-400">{data.origins.whatsapp}</p>
+                                        <p className="text-xs text-slate-400 mt-1">WhatsApp <span className="font-medium text-emerald-400">({data.origins.whatsappPercent}%)</span></p>
+                                    </div>
+                                    <div className="text-center border-r border-slate-700">
                                         <p className="text-3xl font-bold" style={{ color: 'var(--brand-red)' }}>{data.origins.app}</p>
                                         <p className="text-xs text-slate-400 mt-1">App <span className="font-medium" style={{ color: 'var(--brand-red)' }}>({data.origins.appPercent}%)</span></p>
                                     </div>
@@ -435,13 +446,6 @@ export default function Dashboard() {
                                 value={data.funnel?.canceledCount || 0}
                                 color="amber"
                                 onClick={() => setDetailModal({ open: true, title: 'Cancelamentos', items: data.funnel?.listaCanceladosHoje || [] })}
-                            />
-                            <MiniCard
-                                icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 15.546c-.523 0-1.046.151-1.5.454a2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0 2.704 2.704 0 00-3 0 2.704 2.704 0 01-3 0A1.5 1.5 0 003 17.25v.878A2.25 2.25 0 005.25 20.25h13.5A2.25 2.25 0 0021 18.128v-.582zM21 15.546V9a3 3 0 00-3-3h-1.172a3 3 0 01-2.121-.879l-.83-.828A1 1 0 0013.172 4H10.83a1 1 0 00-.707.293l-.83.828A3 3 0 017.172 6H6a3 3 0 00-3 3v6.546" /></svg>}
-                                label="Aniversariantes da semana"
-                                value={data.aniversariantesSemana?.length || 0}
-                                color="blue"
-                                onClick={() => openDrawer('aniversariantesSemana')}
                             />
                         </div>
                     </section>
