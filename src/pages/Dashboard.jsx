@@ -1,8 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import Header from '../components/Header';
-import Drawer, { DrawerTable } from '../components/Drawer';
+import Drawer from '../components/Drawer';
 import useDashboardData from '../hooks/useDashboardData';
 import { supabase } from '../supabaseClient';
 import OrderDetailsModal from '../components/OrderDetailsModal';

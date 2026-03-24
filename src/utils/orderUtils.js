@@ -32,6 +32,8 @@ export const formatCurrency = (value) => {
     return amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
+export const formatBRL = formatCurrency;
+
 /**
  * Enriches order data with calculated fields and safe defaults for names.
  * @param {object} order 
