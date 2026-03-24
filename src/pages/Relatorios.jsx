@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { useTheme } from '../context/ThemeContext';
-import Sidebar from '../components/Sidebar';
+import { formatDate, formatTime } from '../utils/dateUtils';
+import { formatCurrency, getStatusLabel } from '../utils/orderUtils';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend, LineChart, Line, Area, AreaChart
 } from 'recharts';
+import { useGlobalData } from '../context/GlobalDataContext';
 
-/* ═══════════════════════════════════════════════════════════════
+/* ===============================================================
    RELATÓRIOS — Visualização de métricas em gráficos
-   ═══════════════════════════════════════════════════════════════ */
+   =============================================================== */
 
 const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const COLORS = ['#34d399', '#60a5fa', '#a78bfa', '#fbbf24', '#f87171', '#38bdf8', '#c084fc', '#fb923c'];
 const MRR_FALLBACK_VALUE = 80; // valor padrão da assinatura
 
-const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const formatBRL = (v) => fmtBRL.format(v || 0);
+const formatBRL = (v) => formatCurrency(v);
 
 const TABS = [
     { key: 'visao_geral', label: 'Visão Geral', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
@@ -54,8 +55,7 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
             </thead>
             <tbody>
                 {data.map((o, idx) => {
-                    const d = new Date(o.closed_at || o.created_at);
-                    const dataStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                    const dataStr = formatDate(o.closed_at || o.created_at);
                     const items = o.order_items || [];
                     const isExpanded = expandedId === (o.id || idx);
                     const hasItems = items.length > 0;
@@ -131,10 +131,11 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
 
 export default function Relatorios() {
     const { theme } = useTheme();
+    const { adminProfile, loading: globalLoading } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
     const now = new Date();
     const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod);
     const [activeTab, setActiveTab] = useState('visao_geral');
@@ -177,19 +178,6 @@ export default function Relatorios() {
     const selectedYear = useMemo(() => parseInt(selectedPeriod.split('-')[0]), [selectedPeriod]);
     const selectedMonth = useMemo(() => parseInt(selectedPeriod.split('-')[1]) - 1, [selectedPeriod]);
     const periodLabel = useMemo(() => `${MONTH_LABELS[selectedMonth]} ${selectedYear}`, [selectedMonth, selectedYear]);
-
-    // ── Fetch barbershop ──
-    useEffect(() => {
-        async function fetchShop() {
-            const { data: shop } = await supabase
-                .from('barbershops')
-                .select('id')
-                .limit(1)
-                .single();
-            if (shop) setBarbershopId(shop.id);
-        }
-        fetchShop();
-    }, []);
 
     // ── Master fetch ──
     useEffect(() => {
@@ -318,7 +306,7 @@ export default function Relatorios() {
                 // ═══ KPI: Horário de Pico (usa scheduled_at, fallback created_at) — filtro horário comercial ═══
                 const hourCounts = {};
                 currentMonthOrders.forEach(o => {
-                    const h = new Date(o.scheduled_at || o.created_at).getHours();
+                    const h = parseInt(new Date(o.scheduled_at || o.created_at).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));
                     if (h >= 8 && h <= 22) {
                         hourCounts[h] = (hourCounts[h] || 0) + 1;
                     }
@@ -487,13 +475,9 @@ export default function Relatorios() {
     const handlePrint = () => window.print();
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <div className="print-hidden">
-                <Sidebar />
-            </div>
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
+        <div className="flex-1 flex flex-col h-full overflow-hidden -m-8">
                 {/* ── Header ── */}
-                <div className="flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm flex-shrink-0 print-hidden">
+                <div className="flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-900/50 flex-shrink-0 print-hidden">
                     <div>
                         <h1 className="text-xl font-bold text-slate-100">Relatórios e Gráficos</h1>
                         <p className="text-xs text-slate-500 mt-0.5">Análise visual de desempenho</p>
@@ -596,9 +580,7 @@ export default function Relatorios() {
                                 </div>
                             </div>
 
-                            {/* ═════════════════════════════════════════ */}
-                            {/* TAB: Visão Geral                        */}
-                            {/* ═════════════════════════════════════════ */}
+                            {/* TAB: Visão Geral */}
                             {activeTab === 'visao_geral' && (
                                 <div className="space-y-6">
                                     {/* KPI highlight row */}
@@ -939,9 +921,7 @@ export default function Relatorios() {
                                 </div>
                             )}
 
-                            {/* ═════════════════════════════════════════ */}
-                            {/* TAB: Formas de Pagamento                 */}
-                            {/* ═════════════════════════════════════════ */}
+                            {/* TAB: Formas de Pagamento */}
                             {activeTab === 'pagamentos' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                     {/* Payment Methods Pie */}
@@ -1014,9 +994,7 @@ export default function Relatorios() {
                                 </div>
                             )}
 
-                            {/* ═════════════════════════════════════════ */}
-                            {/* TAB: Histórico de Movimentações          */}
-                            {/* ═════════════════════════════════════════ */}
+                            {/* TAB: Histórico de Movimentações */}
                             {activeTab === 'historico' && (
                                 <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
                                     <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
@@ -1087,9 +1065,7 @@ export default function Relatorios() {
                         </>
                     )}
                 </div>
-            </main>
-
-            {/* ══════════ MODAL: Drill-Down de Detalhes ══════════ */}
+            {/* Modal: Drill-Down de Detalhes */}
             {detailsModal.open && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDetailsModal({ open: false, type: '', title: '', data: [] })} />

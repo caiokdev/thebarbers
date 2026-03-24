@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
+import { formatDate, formatTime, formatDateTime } from '../utils/dateUtils';
+import { formatCurrency } from '../utils/orderUtils';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 // ── Helpers ──
-const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatBRL = (v) => formatCurrency(v);
 
 export default function Clientes() {
-    // ── State ──
-    const [barbershopId, setBarbershopId] = useState(null);
+    const { adminProfile, loading: globalLoading, plans: dbPlans, refreshData } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -35,8 +37,7 @@ export default function Clientes() {
     const [newIsSub, setNewIsSub] = useState(false);
     const [newSelectedPlanId, setNewSelectedPlanId] = useState(null);
 
-    // Plan data & picker
-    const [dbPlans, setDbPlans] = useState([]);
+    // Plan picker
     const [planPickerModal, setPlanPickerModal] = useState(null); // { clientId } when open
 
     const [profileModal, setProfileModal] = useState({ open: false, client: null, orders: [] });
@@ -47,20 +48,6 @@ export default function Clientes() {
     const [editName, setEditName] = useState('');
     const [editBirthDate, setEditBirthDate] = useState('');
 
-    // ── Fetch barbershop_id ──
-    useEffect(() => {
-        async function fetchShop() {
-            const { data: shop } = await supabase
-                .from('barbershops')
-                .select('id')
-                .limit(1)
-                .single();
-            if (shop) setBarbershopId(shop.id);
-            else setLoading(false);
-        }
-        fetchShop();
-    }, []);
-
     // ── Fetch clients + cross-join orders ──
     const fetchClientes = useCallback(async () => {
         if (!barbershopId) return;
@@ -68,64 +55,47 @@ export default function Clientes() {
         try {
             const bId = barbershopId;
 
-            // Fetch plans for this barbershop
-            const { data: plansData } = await supabase.from('plans').select('*').eq('barbershop_id', bId);
-            setDbPlans(plansData || []);
-
             // 1. All clients
             const { data: clients } = await supabase
                 .from('clients')
-                .select('id, name, phone, birth_date, is_subscriber, subscription_status, created_at')
+                .select('*')
                 .eq('barbershop_id', bId)
-                .order('name', { ascending: true });
+                .order('name');
 
-            const allClients = clients || [];
-
-            // 2. All closed orders for this barbershop (for cross-join)
-            const { data: closedOrders } = await supabase
+            // 2. All closed orders to count visits
+            const { data: orders } = await supabase
                 .from('orders')
-                .select('client_id, total_amount, closed_at')
+                .select('client_id')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed');
 
-            // Group orders by client
-            const ordersByClient = {};
-            (closedOrders || []).forEach(o => {
-                const cId = o.client_id;
-                if (!cId) return;
-                if (!ordersByClient[cId]) ordersByClient[cId] = { total: 0, lastVisit: null };
-                ordersByClient[cId].total += parseFloat(o.total_amount || 0);
-                const closedDate = o.closed_at ? new Date(o.closed_at) : null;
-                if (closedDate && (!ordersByClient[cId].lastVisit || closedDate > ordersByClient[cId].lastVisit)) {
-                    ordersByClient[cId].lastVisit = closedDate;
-                }
-            });
+            const visitCounts = (orders || []).reduce((acc, o) => {
+                if (o.client_id) acc[o.client_id] = (acc[o.client_id] || 0) + 1;
+                return acc;
+            }, {});
 
-            // 3. Build enriched client list
-            const enriched = allClients.map(c => ({
+            const mapped = (clients || []).map(c => ({
                 id: c.id,
-                nome: c.name || 'Sem nome',
-                telefone: c.phone || '—',
-                dataNascimento: c.birth_date ? new Date(c.birth_date + 'T12:00:00') : null, // Fix timezone issue for birth dates
-                isSubscriber: c.is_subscriber === true,
+                name: c.name,
+                phone: c.phone || 'Sem telefone',
+                isSubscriber: c.is_subscriber || false,
                 subscriptionStatus: c.subscription_status || 'none',
-                createdAt: c.created_at,
-                totalGasto: ordersByClient[c.id]?.total || 0,
-                ultimaVisita: ordersByClient[c.id]?.lastVisit || null,
+                totalVisits: visitCounts[c.id] || 0,
+                createdAt: new Date(c.created_at),
+                birthDate: c.birth_date ? new Date(c.birth_date + 'T12:00:00') : null
             }));
 
-            setClientesLista(enriched);
-            setTotalClientes(allClients.length);
-            setTotalAssinantes(allClients.filter(c => c.is_subscriber === true).length);
+            setClientesLista(mapped);
+            setTotalClientes(mapped.length);
+            setTotalAssinantes(mapped.filter(c => c.isSubscriber).length);
 
-            // Novos este mês
             const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-            const novos = allClients.filter(c => c.created_at && c.created_at >= startOfMonth).length;
-            setNovosEsteMes(novos);
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            setNovosEsteMes(mapped.filter(c => c.createdAt >= startOfMonth).length);
 
         } catch (err) {
             console.error('Erro ao buscar clientes:', err);
+            toast.error('Erro ao carregar lista de clientes');
         } finally {
             setLoading(false);
         }
@@ -135,55 +105,29 @@ export default function Clientes() {
         if (barbershopId) fetchClientes();
     }, [barbershopId, fetchClientes]);
 
-    // ── Filtered list (text search + status filter) ──
-    const filteredClientes = useMemo(() => {
-        return clientesLista
-            .filter(c => {
-                // Status filter
-                if (statusFilter === 'all') return true;
-                if (statusFilter === 'active') return c.isSubscriber === true && c.subscriptionStatus === 'active';
-                if (statusFilter === 'overdue') return c.isSubscriber === true && c.subscriptionStatus === 'overdue';
-                if (statusFilter === 'avulso') return !c.isSubscriber;
-                return true;
-            })
-            .filter(c => {
-                // Text search
-                if (!searchTerm.trim()) return true;
-                const term = searchTerm.toLowerCase();
-                return c.nome.toLowerCase().includes(term) || c.telefone.includes(term);
-            });
-    }, [clientesLista, searchTerm, statusFilter]);
-
     // ── Save new client ──
     const handleSaveClient = async () => {
-        if (!newName.trim()) return toast.error('Nome é obrigatório.');
-        if (newIsSub && !newSelectedPlanId) return toast.error('Selecione um plano para o assinante.');
+        if (!newName.trim()) return toast.error('Nome é obrigatório');
+        if (!barbershopId) return;
+
         setSaving(true);
         try {
-            const { data: newClientData, error } = await supabase.from('clients').insert({
-                name: newName.trim(),
-                phone: newPhone.trim() || null,
-                birth_date: newBirthDate || null,
-                is_subscriber: newIsSub,
-                subscription_status: newIsSub ? 'active' : 'none',
-                barbershop_id: barbershopId,
-            }).select('id').single();
-            if (error) throw error;
-            
-            if (newIsSub && newClientData?.id) {
-                const validUntil = new Date();
-                validUntil.setDate(validUntil.getDate() + 30);
-                await supabase.from('client_subscriptions').insert({
-                    client_id: newClientData.id,
-                    plan_id: newSelectedPlanId,
-                    status: 'active',
-                    haircuts_used: 0,
-                    shaves_used: 0,
-                    valid_until: validUntil.toISOString(),
-                    payment_method: 'PIX'
-                });
-            }
+            const { data: newClientData, error } = await supabase
+                .from('clients')
+                .insert([{
+                    barbershop_id: barbershopId,
+                    name: newName,
+                    phone: newPhone,
+                    birth_date: newBirthDate || null,
+                    is_subscriber: newIsSub,
+                    subscription_status: newIsSub ? 'active' : 'none'
+                }])
+                .select()
+                .single();
 
+            if (error) throw error;
+
+            toast.success('Cliente cadastrado com sucesso!');
             setNewClientModal(false);
             setNewName('');
             setNewPhone('');
@@ -193,6 +137,7 @@ export default function Clientes() {
             setCardInfo({ name: '', number: '', exp: '', cvv: '' });
             setIsCardSectionOpen(false);
             fetchClientes();
+            refreshData();
             
             // If subscribed, try to trigger Celcoin (if card info provided)
             if (newIsSub && cardInfo.number) {
@@ -222,8 +167,8 @@ export default function Clientes() {
     const openProfile = async (client) => {
         setProfileModal({ open: true, client, orders: [] });
         setIsEditingProfile(false);
-        setEditName(client.nome || '');
-        setEditBirthDate(client.dataNascimento ? client.dataNascimento.toISOString().split('T')[0] : '');
+        setEditName(client.name || '');
+        setEditBirthDate(client.birthDate ? client.birthDate.toISOString().split('T')[0] : '');
         setProfileLoading(true);
         try {
             const { data: orders } = await supabase
@@ -235,74 +180,47 @@ export default function Clientes() {
                 .order('closed_at', { ascending: false })
                 .limit(10);
 
-            // Resolve professional names
-            const proIds = [...new Set((orders || []).map(o => o.professional_id).filter(Boolean))];
-            let proMap = {};
-            if (proIds.length > 0) {
-                const { data: profiles } = await supabase.from('professionals').select('id, name').in('id', proIds);
-                (profiles || []).forEach(p => { proMap[p.id] = p.name; });
-            }
-
-            const enrichedOrders = (orders || []).map(o => {
-                const d = o.closed_at ? new Date(o.closed_at) : null;
-                return {
-                    id: o.id,
-                    data: d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}` : '—',
-                    hora: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '',
-                    barbeiro: proMap[o.professional_id] || 'Sem nome',
-                    valor: parseFloat(o.total_amount || 0),
-                    pagamento: o.payment_method || '—',
-                };
-            });
-
-            setProfileModal(prev => ({ ...prev, orders: enrichedOrders }));
+            setProfileModal(prev => ({ ...prev, orders: orders || [] }));
         } catch (err) {
-            console.error('Erro ao buscar perfil:', err);
+            console.error('Erro ao buscar pedidos:', err);
         } finally {
             setProfileLoading(false);
         }
     };
 
-    // ── Update Client Profile ──
-    const handleUpdateClientProfile = async () => {
-        if (!editName.trim()) return toast.error('Nome é obrigatório.');
-
+    const handleUpdateProfile = async () => {
+        if (!editName.trim()) return toast.error('Nome não pode ser vazio');
         try {
             const { error } = await supabase
                 .from('clients')
-                .update({
-                    name: editName.trim(),
-                    birth_date: editBirthDate || null,
-                })
+                .update({ name: editName, birth_date: editBirthDate || null })
                 .eq('id', profileModal.client.id);
 
             if (error) throw error;
 
+            toast.success('Perfil atualizado!');
+            setIsEditingProfile(false);
+            
             // Re-fetch to update all lists and current modal
             await fetchClientes();
+            refreshData();
 
             // Update modal locally to feel instant
             setProfileModal(prev => ({
                 ...prev,
                 client: {
                     ...prev.client,
-                    nome: editName.trim(),
-                    dataNascimento: editBirthDate ? new Date(editBirthDate + 'T12:00:00') : null
+                    name: editName,
+                    birthDate: editBirthDate ? new Date(editBirthDate + 'T12:00:00') : null
                 }
             }));
-
-            setIsEditingProfile(false);
         } catch (err) {
-            toast.error('Erro ao atualizar perfil: ' + err.message);
+            toast.error('Erro ao atualizar: ' + err.message);
         }
     };
 
-    // ── Delete Client ──
     const handleDeleteClient = async () => {
-        if (!window.confirm("Tem certeza que deseja excluir este cliente permanentemente? Isso pode apagar ou desvincular seu histórico dependendo do banco de dados.")) {
-            return;
-        }
-
+        if (!window.confirm('Tem certeza? Isso excluirá o histórico deste cliente.')) return;
         try {
             const { error } = await supabase
                 .from('clients')
@@ -310,47 +228,42 @@ export default function Clientes() {
                 .eq('id', profileModal.client.id);
 
             if (error) throw error;
+            toast.success('Cliente removido.');
 
             setProfileModal({ open: false, client: null, orders: [] });
             fetchClientes();
+            refreshData();
         } catch (err) {
             toast.error('Erro ao excluir cliente: ' + err.message);
         }
     };
 
-    // ── Toggle subscription ──
-    const toggleSubscription = async (clientId, currentStatus) => {
-        const newIsSub = !currentStatus;
-        if (newIsSub) {
-            // Show plan picker modal first
-            setPlanPickerModal({ clientId });
-            setCardInfo({ name: '', number: '', exp: '', cvv: '' });
-            setIsCardSectionOpen(false);
-            return;
-        }
-        // Unsubscribing: update directly
+    const handleRemoveSubscription = async (clientId) => {
+        if (!window.confirm('Remover assinatura deste cliente?')) return;
         try {
             const { error } = await supabase
                 .from('clients')
                 .update({ is_subscriber: false, subscription_status: 'none' })
                 .eq('id', clientId);
             if (error) throw error;
-            // Remove subscription record
-            await supabase.from('client_subscriptions').delete().eq('client_id', clientId);
+
+            toast.success('Assinatura removida.');
             setProfileModal(prev => ({
                 ...prev,
                 client: prev.client ? { ...prev.client, isSubscriber: false, subscriptionStatus: 'none' } : prev.client,
             }));
             fetchClientes();
+            refreshData();
         } catch (err) {
             toast.error('Erro ao remover assinatura: ' + err.message);
         }
     };
 
-    const confirmPlanSelection = async (planId) => {
-        if (!planPickerModal) return;
+    const confirmPlanSelection = async () => {
+        if (!planPickerModal?.clientId) return;
+        if (!newSelectedPlanId) return toast.error('Selecione um plano');
+
         const clientId = planPickerModal.clientId;
-        setPlanPickerModal(null);
         try {
             const { error } = await supabase
                 .from('clients')
@@ -358,38 +271,14 @@ export default function Clientes() {
                 .eq('id', clientId);
             if (error) throw error;
 
-            const { data: existingSub } = await supabase.from('client_subscriptions').select('id').eq('client_id', clientId).single();
-            if (!existingSub) {
-                const validUntil = new Date();
-                validUntil.setDate(validUntil.getDate() + 30);
-                await supabase.from('client_subscriptions').insert({
-                    client_id: clientId,
-                    plan_id: planId,
-                    status: 'active',
-                    haircuts_used: 0,
-                    shaves_used: 0,
-                    valid_until: validUntil.toISOString(),
-                    payment_method: 'PIX'
-                });
-            } else {
-                // Update plan
-                await supabase.from('client_subscriptions').update({ 
-                    plan_id: planId,
-                    payment_method: 'PIX' 
-                }).eq('client_id', clientId);
-            }
-
-            setProfileModal(prev => ({
-                ...prev,
-                client: prev.client ? { ...prev.client, isSubscriber: true, subscriptionStatus: 'active' } : prev.client,
-            }));
-            fetchClientes();
-
-            // Trigger Celcoin if card info provided
+            toast.success('Plano vinculado com sucesso!');
+            setPlanPickerModal(null);
+            
+            // If card info provided, try to trigger Celcoin
             if (cardInfo.number) {
-                const { data: { session } } = await supabase.auth.getSession();
-                const plan = dbPlans.find(p => p.id === planId);
-                await fetch(`${supabase.supabaseUrl}/functions/v1/celcoin-subscription`, {
+                 const { data: { session } } = await supabase.auth.getSession();
+                 const plan = dbPlans.find(p => p.id === newSelectedPlanId);
+                 await fetch(`${supabase.supabaseUrl}/functions/v1/celcoin-subscription`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -402,6 +291,8 @@ export default function Clientes() {
                     })
                 });
             }
+            fetchClientes();
+            refreshData();
             setCardInfo({ name: '', number: '', exp: '', cvv: '' });
             setIsCardSectionOpen(false);
         } catch (err) {
@@ -425,114 +316,94 @@ export default function Clientes() {
                 .from('client_subscriptions')
                 .update({ status: newStatus })
                 .eq('client_id', clientId);
-            if (subErr) throw subErr;
+            // Non-blocking error check for subscription table
+            if (subErr) console.warn('Aviso: Tabela client_subscriptions não atualizada:', subErr.message);
 
-            // Update modal state instantly
-            setProfileModal(prev => ({
-                ...prev,
-                client: prev.client ? { ...prev.client, subscriptionStatus: newStatus } : prev.client,
-            }));
-
-            // Update main list
+            toast.success(`Status alterado para ${newStatus === 'active' ? 'Em dia' : 'Atrasado'}`);
+            setProfileModal(prev => 
+                prev.client && prev.client.id === clientId 
+                    ? { ...prev, client: { ...prev.client, subscriptionStatus: newStatus } }
+                    : prev
+            );
             setClientesLista(prev =>
                 prev.map(c => c.id === clientId ? { ...c, subscriptionStatus: newStatus } : c)
             );
+            refreshData();
         } catch (err) {
             toast.error('Erro ao atualizar status: ' + err.message);
         }
     };
 
-    // ── Excel Export ──
-    const exportToExcel = () => {
-        if (!filteredClientes || filteredClientes.length === 0) {
-            toast.error('Não há clientes para exportar com os filtros atuais.');
-            return;
+    // ── Filtration ──
+    const filteredClientes = useMemo(() => {
+        let result = [...clientesLista];
+        if (searchTerm) {
+            const low = searchTerm.toLowerCase();
+            result = result.filter(c => c.name.toLowerCase().includes(low) || c.phone.includes(low));
         }
+        if (statusFilter === 'sub') result = result.filter(c => c.isSubscriber);
+        if (statusFilter === 'free') result = result.filter(c => !c.isSubscriber);
+        return result;
+    }, [clientesLista, searchTerm, statusFilter]);
 
-        const dataToExport = filteredClientes.map(c => ({
-            'Nome': c.nome,
-            'Contato': c.telefone,
-            'Status': c.isSubscriber ? (c.subscriptionStatus === 'overdue' ? 'Atrasado' : 'Assinante') : 'Avulso',
-            'Última Visita': c.ultimaVisita
-                ? `${String(c.ultimaVisita.getDate()).padStart(2, '0')}/${String(c.ultimaVisita.getMonth() + 1).padStart(2, '0')}/${c.ultimaVisita.getFullYear()}`
-                : '—',
-            'Total Gasto (R$)': c.totalGasto.toFixed(2).replace('.', ',')
+    // ── Export ──
+    const handleExportExcel = () => {
+        const data = filteredClientes.map(c => ({
+            Nome: c.name,
+            Telefone: c.phone,
+            Assinante: c.isSubscriber ? 'Sim' : 'Não',
+            Status: c.subscriptionStatus,
+            Visitas: c.totalVisits,
+            'Data Cadastro': formatDate(c.createdAt)
         }));
-
-        const ws = XLSX.utils.json_to_sheet(dataToExport);
+        const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Clientes");
         XLSX.writeFile(wb, `Lista_Clientes_${new Date().toISOString().slice(0, 10)}.xlsx`);
     };
 
-    // ── PDF Export ──
-    const exportToPDF = () => {
-        if (!filteredClientes || filteredClientes.length === 0) {
-            toast.error('Não há clientes para exportar com os filtros atuais.');
-            return;
-        }
-
+    const handleExportPDF = () => {
         const doc = new jsPDF();
-
         doc.setFontSize(18);
-        doc.text(`Relatório de Clientes`, 14, 22);
-
+        doc.text("Lista de Clientes", 14, 22);
         doc.setFontSize(11);
         doc.setTextColor(100);
-        doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
-        doc.text(`Total de Clientes no relatório: ${filteredClientes.length}`, 14, 36);
+        doc.text(`Gerado em: ${formatDateTime(new Date())}`, 14, 30);
 
-        const tableColumn = ["Nome", "Contato", "Status", "Última Visita", "Total Gasto"];
-        const tableRows = [];
-
-        filteredClientes.forEach(c => {
-            const status = c.isSubscriber ? (c.subscriptionStatus === 'overdue' ? 'Atrasado' : 'Assinante') : 'Avulso';
-            const ultimaVisita = c.ultimaVisita
-                ? `${String(c.ultimaVisita.getDate()).padStart(2, '0')}/${String(c.ultimaVisita.getMonth() + 1).padStart(2, '0')}/${c.ultimaVisita.getFullYear()}`
-                : '—';
-
-            const rowData = [
-                c.nome,
-                c.telefone,
-                status,
-                ultimaVisita,
-                formatBRL(c.totalGasto)
-            ];
-            tableRows.push(rowData);
-        });
+        const tableData = filteredClientes.map(c => [
+            c.name,
+            c.phone,
+            c.isSubscriber ? 'Sim' : 'Não',
+            c.subscriptionStatus,
+            c.totalVisits.toString(),
+            formatDate(c.createdAt)
+        ]);
 
         autoTable(doc, {
-            head: [tableColumn],
-            body: tableRows,
-            startY: 44,
-            theme: 'striped',
-            headStyles: { fillColor: [44, 62, 80], textColor: 255 },
-            alternateRowStyles: { fillColor: [241, 245, 249] },
+            startY: 35,
+            head: [['Nome', 'Telefone', 'Assinador', 'Status', 'Visitas', 'Cadastro']],
+            body: tableData,
+            theme: 'grid',
+            headStyles: { fillColor: [30, 41, 59] }
         });
 
         doc.save(`Lista_Clientes_${new Date().toISOString().slice(0, 10)}.pdf`);
     };
 
     // ── Render ──
-    if (loading && clientesLista.length === 0) {
+    if ((loading || globalLoading) && clientesLista.length === 0) {
         return (
-            <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-                <Sidebar />
-                <main className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
-                        <p className="text-slate-500 text-sm">Carregando clientes...</p>
-                    </div>
-                </main>
+            <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
+                    <p className="text-slate-500 text-sm">Carregando clientes...</p>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
-
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
+        <main className="flex-1 flex flex-col h-full overflow-hidden">
                 {/* ── HEADER ── */}
                 <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center justify-between px-8 flex-shrink-0">
                     <div>
@@ -550,648 +421,501 @@ export default function Clientes() {
                     </button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
-
-                    {/* ══════════ LINHA 1 — KPI Cards ══════════ */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* Total Clientes */}
-                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                </div>
-                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Cadastrados</p>
+                <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                    {/* ── KPI HIGHLIGHTS ── */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl">
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total de Clientes</p>
+                            <div className="flex items-baseline gap-2">
+                                <h2 className="text-3xl font-bold text-slate-100">{totalClientes}</h2>
+                                <span className="text-[10px] text-emerald-500 font-medium">+5% este mês</span>
                             </div>
-                            <p className="text-3xl font-bold text-slate-100">{totalClientes}</p>
                         </div>
-                        {/* Assinantes */}
-                        <div className="bg-slate-800 rounded-2xl p-5" style={{ border: '1px solid rgba(181,148,16,0.3)' }}>
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(181,148,16,0.12)' }}>
-                                    <svg className="w-5 h-5" style={{ color: '#B59410' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-                                    </svg>
-                                </div>
-                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Assinantes</p>
+                        <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl">
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Assinantes Ativos</p>
+                            <div className="flex items-baseline gap-2">
+                                <h2 className="text-3xl font-bold text-blue-500">{totalAssinantes}</h2>
+                                <span className="text-[10px] text-slate-500 font-medium">{(totalClientes > 0 ? (totalAssinantes / totalClientes * 100).toFixed(0) : 0)}% da base</span>
                             </div>
-                            <p className="text-3xl font-bold" style={{ color: '#B59410' }}>{totalAssinantes}</p>
-                            <p className="text-[10px] text-slate-600 mt-1">{totalClientes > 0 ? ((totalAssinantes / totalClientes) * 100).toFixed(0) : 0}% da base</p>
                         </div>
-                        {/* Novos este mês */}
-                        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-5">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM3 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 019.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
-                                    </svg>
-                                </div>
-                                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Novos este mês</p>
-                            </div>
-                            <p className="text-3xl font-bold text-emerald-400">{novosEsteMes}</p>
+                        <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl">
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1">Novos (Este Mês)</p>
+                            <h2 className="text-3xl font-bold text-amber-500">{novosEsteMes}</h2>
                         </div>
                     </div>
 
-                    {/* ══════════ LINHA 2 — Filtros + Search ══════════ */}
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full">
-                            {/* Filter Pills */}
-                            <div className="flex flex-wrap items-center gap-1.5 bg-slate-800 rounded-xl border border-slate-700 p-1">
-                                {[
-                                    { key: 'all', label: 'Todos' },
-                                    { key: 'active', label: 'Em Dia' },
-                                    { key: 'overdue', label: 'Atrasados' },
-                                    { key: 'avulso', label: 'Avulsos' },
-                                ].map(f => (
-                                    <button
-                                        key={f.key}
-                                        onClick={() => setStatusFilter(f.key)}
-                                        className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ${statusFilter === f.key
-                                            ? f.key === 'overdue'
-                                                ? 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30 shadow-sm'
-                                                : f.key === 'active'
-                                                    ? 'bg-red-600/20 text-red-500 ring-1 ring-red-600/30 shadow-sm'
-                                                    : 'bg-slate-700 text-slate-200 ring-1 ring-slate-600 shadow-sm'
-                                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50'
-                                            }`}
-                                    >
-                                        {f.label}
-                                        {f.key !== 'all' && (
-                                            <span className="ml-1.5 text-[10px] opacity-70">
-                                                {f.key === 'active' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'active').length
-                                                    : f.key === 'overdue' ? clientesLista.filter(c => c.isSubscriber && c.subscriptionStatus === 'overdue').length
-                                                        : clientesLista.filter(c => !c.isSubscriber).length}
-                                            </span>
-                                        )}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* ── Export Buttons ── */}
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                                onClick={exportToExcel}
-                                className="px-3 py-2 bg-red-600/10 text-red-500 hover:bg-red-600/20 border border-red-600/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
-                            >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    {/* ── BARRA DE FERRAMENTAS ── */}
+                    <div className="bg-slate-800 border border-slate-700 p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
+                        <div className="flex items-center gap-4 w-full md:w-auto">
+                            <div className="relative w-full md:w-80">
+                                <svg className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
-                                Excel
-                            </button>
-                            <button
-                                onClick={exportToPDF}
-                                className="px-3 py-2 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
-                            >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                                </svg>
-                                PDF
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* ══════════ Search Bar ══════════ */}
-                    <div className="relative">
-                        <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Pesquisar por nome ou telefone..."
-                            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50 focus:ring-1 focus:ring-red-600/30 transition-all"
-                        />
-                    </div>
-
-                    {/* ══════════ LINHA 3 — Tabela de Clientes ══════════ */}
-                    <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="border-b border-slate-700">
-                                        <th className="text-left px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Nome</th>
-                                        <th className="text-left px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Contacto</th>
-                                        <th className="text-left px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                                        <th className="text-left px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Última Visita</th>
-                                        <th className="text-right px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Gasto</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredClientes.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={5} className="px-6 py-12 text-center text-slate-600">
-                                                {searchTerm ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado.'}
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        filteredClientes.map((c) => (
-                                            <tr
-                                                key={c.id}
-                                                onClick={() => openProfile(c)}
-                                                className="border-b border-slate-700/50 hover:bg-slate-700/30 cursor-pointer transition-colors"
-                                            >
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 flex-shrink-0">
-                                                            {c.nome.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
-                                                        </div>
-                                                        <span className="font-medium text-slate-200">{c.nome}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4 text-slate-400">{c.telefone}</td>
-                                                <td className="px-6 py-4">
-                                                    {c.isSubscriber ? (
-                                                        c.subscriptionStatus === 'overdue' ? (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-600 text-white ring-1 ring-red-500">
-                                                                ⚠ Atrasado
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold" style={{ background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' }}>
-                                                                ★ Assinante
-                                                            </span>
-                                                        )
-                                                    ) : (
-                                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-700 text-slate-300 ring-1 ring-inset ring-slate-600">
-                                                            Avulso
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-6 py-4 text-slate-400">
-                                                    {c.ultimaVisita
-                                                        ? `${String(c.ultimaVisita.getDate()).padStart(2, '0')}/${String(c.ultimaVisita.getMonth() + 1).padStart(2, '0')}/${c.ultimaVisita.getFullYear()}`
-                                                        : '—'}
-                                                </td>
-                                                <td className="px-6 py-4 text-right font-semibold text-slate-200">{formatBRL(c.totalGasto)}</td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                </div>
-            </main>
-
-            {/* ══════════ MODAL: Novo Cliente ══════════ */}
-            {newClientModal && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setNewClientModal(false)} />
-                    <div className="relative bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4">
-                        {/* Header */}
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700">
-                            <h3 className="text-base font-semibold text-slate-100">Novo Cliente</h3>
-                            <button onClick={() => setNewClientModal(false)} className="text-slate-500 hover:text-slate-300 transition-colors">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                        {/* Body */}
-                        <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Nome *</label>
                                 <input
                                     type="text"
-                                    value={newName}
-                                    onChange={e => setNewName(e.target.value)}
-                                    placeholder="Nome completo"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
+                                    placeholder="Buscar por nome ou telefone..."
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-red-600 transition-colors"
                                 />
                             </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Telefone / WhatsApp</label>
-                                <input
-                                    type="text"
-                                    value={newPhone}
-                                    onChange={e => setNewPhone(e.target.value)}
-                                    placeholder="(00) 00000-0000"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Data de Nascimento</label>
-                                <input
-                                    type="date"
-                                    value={newBirthDate}
-                                    onChange={e => setNewBirthDate(e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-red-600/50"
-                                />
-                            </div>
-                            <label className="flex items-center gap-3 cursor-pointer group">
-                                <div className={`w-10 h-6 rounded-full transition-colors flex items-center ${newIsSub ? 'bg-red-600' : 'bg-slate-700'}`}
-                                    onClick={() => { setNewIsSub(v => !v); setNewSelectedPlanId(null); }}>
-                                    <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-1 ${newIsSub ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </div>
-                                <span className="text-sm text-slate-300 group-hover:text-slate-200">Assinante do clube</span>
-                                <input type="checkbox" checked={newIsSub} onChange={e => { setNewIsSub(e.target.checked); setNewSelectedPlanId(null); }} className="hidden" />
-                            </label>
-                            {/* ── Plan selector (shown when subscriber toggle is on) ── */}
-                            {newIsSub && (
-                                <div className="mt-1">
-                                    <p className="text-xs font-semibold text-slate-400 mb-2">Plano do assinante *</p>
-                                    {dbPlans.length === 0 ? (
-                                        <p className="text-xs text-slate-500 bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700">
-                                            Nenhum plano cadastrado. Crie os planos na aba "Planos" primeiro.
-                                        </p>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {dbPlans.map(plan => (
-                                                <button
-                                                    key={plan.id}
-                                                    type="button"
-                                                    onClick={() => setNewSelectedPlanId(plan.id)}
-                                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all text-left ${
-                                                        newSelectedPlanId === plan.id
-                                                            ? 'bg-red-600/15 border-red-500/50 ring-1 ring-red-500/30'
-                                                            : 'bg-slate-900/60 border-slate-700 hover:border-slate-500'
-                                                    }`}
-                                                >
-                                                    <div>
-                                                        <p className={`text-sm font-semibold ${newSelectedPlanId === plan.id ? 'text-white' : 'text-slate-200'}`}>
-                                                            {plan.name}
-                                                        </p>
-                                                        <p className="text-[11px] text-slate-500 mt-0.5">
-                                                            {plan.haircut_limit > 0 ? `${plan.haircut_limit} cortes` : ''}
-                                                            {plan.haircut_limit > 0 && plan.shave_limit > 0 ? ' + ' : ''}
-                                                            {plan.shave_limit > 0 ? `${plan.shave_limit} barbas` : ''}
-                                                            {' · '}
-                                                            {(plan.price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês
-                                                        </p>
-                                                    </div>
-                                                    {newSelectedPlanId === plan.id && (
-                                                        <svg className="w-5 h-5 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                                        </svg>
-                                                    )}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* ── Card Capture "Gavetinha" ── */}
-                            {newIsSub && (
-                                <div className="mt-4">
-                                    <button 
-                                        type="button"
-                                        onClick={() => setIsCardSectionOpen(!isCardSectionOpen)}
-                                        className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-all"
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                                            </svg>
-                                            <span className="text-sm font-semibold text-slate-300">Dados do Cartão (Celcoin)</span>
-                                        </div>
-                                        <svg className={`w-4 h-4 text-slate-500 transition-transform ${isCardSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                    </button>
-                                    
-                                    {isCardSectionOpen && (
-                                        <div className="mt-2 p-4 bg-slate-900 border border-slate-700 rounded-xl space-y-4 animate-in slide-in-from-top-2 duration-200">
-                                            <div>
-                                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Número do Cartão</label>
-                                                <input
-                                                    type="text"
-                                                    value={cardInfo.number}
-                                                    onChange={e => {
-                                                        const val = e.target.value.replace(/\D/g, '').substring(0, 16);
-                                                        const fmt = val.replace(/(\d{4})(?=\d)/g, '$1 ');
-                                                        setCardInfo({ ...cardInfo, number: fmt });
-                                                    }}
-                                                    placeholder="0000 0000 0000 0000"
-                                                    className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 font-mono"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nome no Cartão</label>
-                                                <input
-                                                    type="text"
-                                                    value={cardInfo.name}
-                                                    onChange={e => setCardInfo({ ...cardInfo, name: e.target.value.toUpperCase() })}
-                                                    placeholder="NOME COMPLETO"
-                                                    className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 uppercase"
-                                                />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Validade</label>
-                                                    <input
-                                                        type="text"
-                                                        value={cardInfo.exp}
-                                                        onChange={e => {
-                                                            let val = e.target.value.replace(/\D/g, '').substring(0, 4);
-                                                            if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2);
-                                                            setCardInfo({ ...cardInfo, exp: val });
-                                                        }}
-                                                        placeholder="MM/AA"
-                                                        className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">CVV</label>
-                                                    <input
-                                                        type="text"
-                                                        value={cardInfo.cvv}
-                                                        onChange={e => setCardInfo({ ...cardInfo, cvv: e.target.value.replace(/\D/g, '').substring(0, 4) })}
-                                                        placeholder="123"
-                                                        className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                        {/* Footer */}
-                        <div className="px-6 py-4 border-t border-slate-700 flex justify-end gap-3">
-                            <button onClick={() => setNewClientModal(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors">
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={handleSaveClient}
-                                disabled={saving}
-                                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+                            <select
+                                value={statusFilter}
+                                onChange={e => setStatusFilter(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-red-600 transition-colors cursor-pointer"
                             >
-                                {saving ? 'Salvando...' : 'Salvar Cliente'}
+                                <option value="all">Todos os clientes</option>
+                                <option value="sub">Assinantes</option>
+                                <option value="free">Não Assinantes</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button onClick={handleExportExcel} className="p-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl text-slate-300 transition-colors" title="Exportar Excel">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                            </button>
+                            <button onClick={handleExportPDF} className="p-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl text-slate-300 transition-colors" title="Exportar PDF">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
 
-            {/* ══════════ MODAL: Perfil do Cliente (Drill-down) ══════════ */}
-            {profileModal.open && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setProfileModal({ open: false, client: null, orders: [] })} />
-                    <div className="relative bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col">
-                        {/* Header */}
-                        <div className="px-6 py-5 border-b border-slate-700">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-slate-300">
-                                        {profileModal.client?.nome.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
-                                    </div>
-                                    <div>
-                                        {isEditingProfile ? (
-                                            <input
-                                                type="text"
-                                                value={editName}
-                                                onChange={(e) => setEditName(e.target.value)}
-                                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-red-600/50"
-                                            />
-                                        ) : (
-                                            <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-                                                {profileModal.client?.nome}
-                                                {profileModal.client?.isSubscriber && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-600/15 text-red-500 border border-red-600/30">
-                                                        Assinante
+                    {/* ── LISTA DE CLIENTES ── */}
+                    <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-sm">
+                        <table className="w-full text-left">
+                            <thead className="bg-slate-900/50">
+                                <tr>
+                                    <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Cliente</th>
+                                    <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Contato</th>
+                                    <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Assinante</th>
+                                    <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center">Visitas</th>
+                                    <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700/50">
+                                {filteredClientes.map((c) => (
+                                    <tr key={c.id} className="hover:bg-slate-700/30 transition-colors">
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 bg-slate-700 border border-slate-600 rounded-xl flex items-center justify-center text-xs font-bold text-slate-300">
+                                                    {c.name.substring(0, 2).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-semibold text-slate-100">{c.name}</p>
+                                                    <p className="text-[10px] text-slate-500">Cadastrado em {formatDate(c.createdAt)}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className="text-sm text-slate-400">{c.phone}</span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {c.isSubscriber ? (
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="inline-flex items-center w-fit px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                        ASSINANTE
                                                     </span>
-                                                )}
-                                            </h3>
-                                        )}
-                                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                                            {profileModal.client?.telefone}
-                                            <span className="pl-2 border-l border-slate-600 flex items-center gap-2">
-                                                Nasc:
-                                                {isEditingProfile ? (
-                                                    <input
-                                                        type="date"
-                                                        value={editBirthDate}
-                                                        onChange={(e) => setEditBirthDate(e.target.value)}
-                                                        className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-xs text-slate-200 focus:outline-none focus:border-red-600/50"
-                                                    />
-                                                ) : (
-                                                    profileModal.client?.dataNascimento ? profileModal.client.dataNascimento.toLocaleDateString('pt-BR') : '—'
-                                                )}
-                                            </span>
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    {isEditingProfile ? (
-                                        <>
-                                            <button onClick={() => setIsEditingProfile(false)} className="text-slate-400 hover:text-slate-200 transition-colors text-xs font-medium px-2 py-1">
-                                                Cancelar
+                                                    {c.subscriptionStatus === 'overdue' && (
+                                                        <span className="text-[9px] font-bold text-red-500 uppercase">ATRASADO</span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => setPlanPickerModal({ clientId: c.id })}
+                                                    className="text-[10px] font-bold text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1 group"
+                                                >
+                                                    VINCULAR PLANO
+                                                    <svg className="w-3 h-3 translate-y-px opacity-0 group-hover:opacity-100 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                                                </button>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="text-sm font-bold text-slate-200">{c.totalVisits}</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <button
+                                                onClick={() => openProfile(c)}
+                                                className="p-2 py-1.5 text-xs bg-slate-900 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-300 font-semibold transition-all"
+                                            >
+                                                Ver Perfil
                                             </button>
-                                            <button onClick={handleUpdateClientProfile} className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
-                                                Salvar
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <button onClick={() => setIsEditingProfile(true)} className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors" title="Editar Cliente">
-                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                            </svg>
-                                        </button>
-                                    )}
-                                    <button onClick={() => setProfileModal({ open: false, client: null, orders: [] })} className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 rounded-lg transition-colors">
-                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                            {/* Subscription toggle */}
-                            <div className="mt-4 flex items-center justify-between bg-slate-900/50 rounded-xl px-4 py-3 border border-slate-700/50">
-                                <div className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                                    </svg>
-                                    <span className="text-sm font-medium text-slate-300">Clube de Assinatura</span>
-                                </div>
-                                <button
-                                    onClick={() => toggleSubscription(profileModal.client?.id, profileModal.client?.isSubscriber)}
-                                    className="relative"
-                                >
-                                    <div className={`w-12 h-7 rounded-full transition-colors flex items-center ${profileModal.client?.isSubscriber ? 'bg-red-600' : 'bg-slate-700'}`}>
-                                        <div className={`w-5 h-5 bg-white rounded-full shadow-md transition-transform mx-1 ${profileModal.client?.isSubscriber ? 'translate-x-5' : 'translate-x-0'}`} />
-                                    </div>
-                                </button>
-                            </div>
-                            {/* Payment status toggle (only for subscribers) */}
-                            {profileModal.client?.isSubscriber === true && (
-                                <div className="mt-2">
-                                    <button
-                                        onClick={() => handleTogglePaymentStatus(profileModal.client?.id, profileModal.client?.subscriptionStatus)}
-                                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${profileModal.client?.subscriptionStatus === 'active'
-                                            ? 'bg-red-600/10 border-emerald-500/25 hover:bg-red-600/20'
-                                            : 'bg-rose-500/10 border-rose-500/25 hover:bg-rose-500/20'
-                                            }`}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-semibold ${profileModal.client?.subscriptionStatus === 'active' ? 'text-red-500' : 'text-rose-400'
-                                                }`}>
-                                                {profileModal.client?.subscriptionStatus === 'active' ? '✓ Em dia' : '⚠️ Atrasado'}
-                                            </span>
-                                        </div>
-                                        <span className="text-[10px] text-slate-500">
-                                            Clicar para marcar como {profileModal.client?.subscriptionStatus === 'active' ? 'Atrasado' : 'Em dia'}
-                                        </span>
-                                    </button>
-                                </div>
-                            )}
-                            {/* Financial summary & Delete action */}
-                            <div className="mt-3 flex gap-3">
-                                <div className="flex-1 bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
-                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Total deixado na barbearia</p>
-                                    <p className="text-2xl font-bold" style={{ color: '#B59410' }}>{formatBRL(profileModal.client?.totalGasto)}</p>
-                                </div>
-                                <button
-                                    onClick={handleDeleteClient}
-                                    className="flex items-center justify-center p-4 bg-slate-900/50 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 transition-colors"
-                                    title="Excluir Cliente Permanentemente"
-                                >
-                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        {/* Orders list */}
-                        <div className="flex-1 overflow-y-auto px-6 py-4">
-                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Últimas Comandas</h4>
-                            {profileLoading ? (
-                                <div className="text-center py-8">
-                                    <div className="inline-block w-6 h-6 border-2 border-slate-700 border-t-red-600 rounded-full animate-spin"></div>
-                                </div>
-                            ) : profileModal.orders.length > 0 ? (
-                                <div className="space-y-2">
-                                    {profileModal.orders.map((o) => (
-                                        <div key={o.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/50 border border-slate-700/40 hover:border-slate-600 transition-colors">
-                                            <div>
-                                                <p className="text-sm font-medium text-slate-200">{o.data} <span className="text-slate-600 text-xs ml-1">{o.hora}</span></p>
-                                                <p className="text-[11px] text-slate-500">{o.barbeiro} • {o.pagamento}</p>
-                                            </div>
-                                            <p className="text-sm font-bold text-red-500">{formatBRL(o.valor)}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <p className="text-sm text-slate-600">Nenhuma comanda fechada</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ════════ PLAN PICKER MODAL ════════ */}
-            {planPickerModal && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setPlanPickerModal(null)}></div>
-                    <div className="relative bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-sm p-8 shadow-2xl">
-                        <h3 className="text-lg font-bold text-white mb-1">Escolha o Plano</h3>
-                        <p className="text-sm text-slate-400 mb-6">Selecione o plano que este cliente irá assinar:</p>
-                        {dbPlans.length === 0 ? (
-                            <div className="text-center py-4">
-                                <p className="text-slate-500 text-sm">Nenhum plano cadastrado ainda.</p>
-                                <p className="text-slate-600 text-xs mt-1">Crie os planos na aba "Planos" primeiro.</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {dbPlans.map(plan => (
-                                    <button
-                                        key={plan.id}
-                                        onClick={() => confirmPlanSelection(plan.id)}
-                                        className="w-full flex items-center justify-between px-4 py-4 bg-slate-900 hover:bg-slate-700 border border-slate-700 hover:border-red-500/50 rounded-2xl transition-all group"
-                                    >
-                                        <div className="text-left">
-                                            <p className="text-sm font-bold text-slate-100 group-hover:text-white">{plan.name}</p>
-                                            <p className="text-xs text-slate-500 mt-0.5">
-                                                {plan.haircut_limit > 0 ? `${plan.haircut_limit} cortes` : ''}
-                                                {plan.haircut_limit > 0 && plan.shave_limit > 0 ? ' + ' : ''}
-                                                {plan.shave_limit > 0 ? `${plan.shave_limit} barbas` : ''}
-                                                {' · '}
-                                                {(plan.price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês
-                                            </p>
-                                        </div>
-                                        <svg className="w-5 h-5 text-slate-600 group-hover:text-red-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                                        </svg>
-                                    </button>
+                                        </td>
+                                    </tr>
                                 ))}
+                            </tbody>
+                        </table>
+                        {filteredClientes.length === 0 && (
+                            <div className="px-6 py-16 text-center">
+                                <p className="text-slate-500 text-sm">Nenhum cliente encontrado.</p>
                             </div>
                         )}
-
-                        {/* ── Card Capture for Existing Client ── */}
-                        <div className="mt-4">
-                            <button 
-                                type="button"
-                                onClick={() => setIsCardSectionOpen(!isCardSectionOpen)}
-                                className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-all"
-                            >
-                                <div className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                                    </svg>
-                                    <span className="text-sm font-semibold text-slate-300">Dados do Cartão (Opcional)</span>
-                                </div>
-                                <svg className={`w-4 h-4 text-slate-500 transition-transform ${isCardSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </button>
-                            
-                            {isCardSectionOpen && (
-                                <div className="mt-2 p-4 bg-slate-900 border border-slate-700 rounded-xl space-y-4">
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Número do Cartão</label>
-                                        <input
-                                            type="text"
-                                            value={cardInfo.number}
-                                            onChange={e => {
-                                                const val = e.target.value.replace(/\D/g, '').substring(0, 16);
-                                                const fmt = val.replace(/(\d{4})(?=\d)/g, '$1 ');
-                                                setCardInfo({ ...cardInfo, number: fmt });
-                                            }}
-                                            placeholder="0000 0000 0000 0000"
-                                            className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 font-mono"
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Validade</label>
-                                            <input
-                                                type="text"
-                                                value={cardInfo.exp}
-                                                onChange={e => {
-                                                    let val = e.target.value.replace(/\D/g, '').substring(0, 4);
-                                                    if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2);
-                                                    setCardInfo({ ...cardInfo, exp: val });
-                                                }}
-                                                placeholder="MM/AA"
-                                                className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">CVV</label>
-                                            <input
-                                                type="text"
-                                                value={cardInfo.cvv}
-                                                onChange={e => setCardInfo({ ...cardInfo, cvv: e.target.value.replace(/\D/g, '').substring(0, 4) })}
-                                                placeholder="123"
-                                                className="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <button onClick={() => setPlanPickerModal(null)} className="mt-6 w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-semibold transition-colors">
-                            Cancelar
-                        </button>
                     </div>
                 </div>
-            )}
-        </div>
+
+                {/* ── MODAL: NOVO CLIENTE ── */}
+                {newClientModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+                        <div className="bg-slate-800 border border-slate-700 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                            <header className="px-6 py-5 border-b border-slate-700 flex items-center justify-between">
+                                <h3 className="font-bold text-slate-100">Novo Cliente</h3>
+                                <button onClick={() => setNewClientModal(false)} className="text-slate-500 hover:text-white transition-colors">
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                            </header>
+                            <div className="p-6 space-y-5">
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome Completo</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: João Silva"
+                                        value={newName}
+                                        onChange={e => setNewName(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-red-600 transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">WhatsApp / Telefone</label>
+                                    <input
+                                        type="text"
+                                        placeholder="(00) 00000-0000"
+                                        value={newPhone}
+                                        onChange={e => setNewPhone(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-red-600 transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nascimento</label>
+                                    <input
+                                        type="date"
+                                        value={newBirthDate}
+                                        onChange={e => setNewBirthDate(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-red-600 transition-colors"
+                                    />
+                                </div>
+
+                                {/* Seção Assinatura */}
+                                <div className="p-4 bg-slate-900/50 border border-slate-700 rounded-xl space-y-4">
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            id="sub-check"
+                                            checked={newIsSub}
+                                            onChange={e => setNewIsSub(e.target.checked)}
+                                            className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-600"
+                                        />
+                                        <label htmlFor="sub-check" className="text-sm font-semibold text-slate-300 cursor-pointer">
+                                            Assinatura Recorrente?
+                                        </label>
+                                    </div>
+
+                                    {newIsSub && (
+                                        <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase">Escolha o Plano</label>
+                                                <select
+                                                    value={newSelectedPlanId || ''}
+                                                    onChange={e => setNewSelectedPlanId(e.target.value)}
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none"
+                                                >
+                                                    <option value="">Selecione...</option>
+                                                    {dbPlans.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name} — {formatBRL(p.price)}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Dados do Cartão (Opcional)</label>
+                                                    <button 
+                                                        onClick={() => setIsCardSectionOpen(!isCardSectionOpen)}
+                                                        className="text-[10px] text-blue-400 font-bold hover:underline"
+                                                    >
+                                                        {isCardSectionOpen ? 'OCULTAR' : 'PREENCHER AGORA'}
+                                                    </button>
+                                                </div>
+                                                
+                                                {isCardSectionOpen && (
+                                                    <div className="space-y-3 bg-slate-800 p-3 rounded-lg border border-slate-700">
+                                                        <input 
+                                                            placeholder="Nome no Cartão"
+                                                            value={cardInfo.name}
+                                                            onChange={e => setCardInfo({...cardInfo, name: e.target.value})}
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                                        />
+                                                        <input 
+                                                            placeholder="Número do Cartão"
+                                                            value={cardInfo.number}
+                                                            onChange={e => setCardInfo({...cardInfo, number: e.target.value})}
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                                        />
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <input 
+                                                                placeholder="MM/AA"
+                                                                value={cardInfo.exp}
+                                                                onChange={e => setCardInfo({...cardInfo, exp: e.target.value})}
+                                                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                                            />
+                                                            <input 
+                                                                placeholder="CVV"
+                                                                value={cardInfo.cvv}
+                                                                onChange={e => setCardInfo({...cardInfo, cvv: e.target.value})}
+                                                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <footer className="p-6 bg-slate-900/50 border-t border-slate-700 flex gap-3">
+                                <button
+                                    onClick={() => setNewClientModal(false)}
+                                    className="flex-1 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 font-semibold hover:bg-slate-800 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleSaveClient}
+                                    disabled={saving}
+                                    className="flex-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 disabled:grayscale"
+                                >
+                                    {saving ? 'Gravando...' : 'Cadastrar Cliente'}
+                                </button>
+                            </footer>
+                        </div>
+                    </div>
+                )}
+
+                {/* ── MODAL: PICK PLAN (for existing free client) ── */}
+                {planPickerModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+                        <div className="bg-slate-800 border border-slate-700 w-full max-w-sm rounded-2xl shadow-2xl animate-in zoom-in duration-200">
+                            <header className="px-6 py-5 border-b border-slate-700 flex items-center justify-between">
+                                <h3 className="font-bold text-slate-100 italic tracking-tight">Vincular Assinatura</h3>
+                                <button onClick={() => setPlanPickerModal(null)} className="text-slate-500 hover:text-white transition-colors">
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                            </header>
+                            <div className="p-6 space-y-4">
+                                <p className="text-xs text-slate-400 text-center px-4 leading-relaxed">
+                                    Transforme este cliente em um assinante e garanta receita recorrente para sua barbearia.
+                                </p>
+                                <select
+                                    value={newSelectedPlanId || ''}
+                                    onChange={e => setNewSelectedPlanId(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+                                >
+                                    <option value="">Selecione um plano...</option>
+                                    {dbPlans.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name} — {formatBRL(p.price)}</option>
+                                    ))}
+                                </select>
+
+                                {/* Dados do Cartão (Opcional aqui também) */}
+                                <div className="p-3 bg-slate-900 rounded-xl border border-slate-700 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-slate-500">DADOS DE PAGAMENTO</span>
+                                        <button 
+                                            onClick={() => setIsCardSectionOpen(!isCardSectionOpen)}
+                                            className="text-[10px] text-blue-400 font-bold hover:underline"
+                                        >
+                                            {isCardSectionOpen ? 'CANCELAR' : 'ADICIONAR CARTÃO'}
+                                        </button>
+                                    </div>
+                                    {isCardSectionOpen && (
+                                        <div className="space-y-3 animate-in fade-in duration-300">
+                                            <input 
+                                                placeholder="Nome no Cartão"
+                                                value={cardInfo.name}
+                                                onChange={e => setCardInfo({...cardInfo, name: e.target.value})}
+                                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                            />
+                                            <input 
+                                                placeholder="Número do Cartão"
+                                                value={cardInfo.number}
+                                                onChange={e => setCardInfo({...cardInfo, number: e.target.value})}
+                                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                            />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <input 
+                                                    placeholder="MM/AA"
+                                                    value={cardInfo.exp}
+                                                    onChange={e => setCardInfo({...cardInfo, exp: e.target.value})}
+                                                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                                />
+                                                <input 
+                                                    placeholder="CVV"
+                                                    value={cardInfo.cvv}
+                                                    onChange={e => setCardInfo({...cardInfo, cvv: e.target.value})}
+                                                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <footer className="p-6 pt-2">
+                                <button
+                                    onClick={confirmPlanSelection}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/20"
+                                >
+                                    Confirmar Assinatura
+                                </button>
+                            </footer>
+                        </div>
+                    </div>
+                )}
+
+                {/* ── MODAL: PERFIL DO CLIENTE ── */}
+                {profileModal.open && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-950/40 backdrop-blur-[2px]">
+                        <div className="bg-slate-800 w-full max-w-lg h-full border-l border-slate-700 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+                            <header className="px-8 py-6 border-b border-slate-700 flex items-center justify-between bg-slate-800/50 backdrop-blur-md sticky top-0 z-10">
+                                <div>
+                                    <h3 className="text-xl font-bold text-slate-100">Perfil do Cliente</h3>
+                                    <p className="text-xs text-slate-500 font-medium tracking-tight">Análise e Gestão de Conta</p>
+                                </div>
+                                <button onClick={() => setProfileModal({ open: false, client: null, orders: [] })} className="p-2 hover:bg-slate-700 rounded-xl text-slate-400 transition-colors">
+                                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                            </header>
+
+                            <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                                {/* CARD PRINCIPAL */}
+                                <div className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex items-center gap-5">
+                                            <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-800 rounded-2xl border border-slate-600 flex items-center justify-center text-xl font-bold text-slate-100 shadow-inner">
+                                                {profileModal.client.name.substring(0, 2).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                {isEditingProfile ? (
+                                                    <div className="space-y-3 mt-1">
+                                                        <input 
+                                                            value={editName}
+                                                            onChange={e => setEditName(e.target.value)}
+                                                            className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white w-full"
+                                                        />
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className="text-[10px] text-slate-500 uppercase font-bold">Nascimento</span>
+                                                            <input 
+                                                                type="date"
+                                                                value={editBirthDate}
+                                                                onChange={e => setEditBirthDate(e.target.value)}
+                                                                className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-xs text-white"
+                                                            />
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button onClick={handleUpdateProfile} className="text-[10px] font-bold bg-emerald-500/10 text-emerald-500 px-3 py-1.5 rounded-lg border border-emerald-500/20">SALVAR</button>
+                                                            <button onClick={() => setIsEditingProfile(false)} className="text-[10px] font-bold bg-slate-700 text-slate-400 px-3 py-1.5 rounded-lg">CANCELAR</button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <h4 className="text-xl font-bold text-white flex items-center gap-2">
+                                                            {profileModal.client.name}
+                                                            <button onClick={() => setIsEditingProfile(true)} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-500 transition-colors">
+                                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>
+                                                            </button>
+                                                        </h4>
+                                                        <div className="flex items-center gap-3 mt-1.5">
+                                                            <span className="text-sm font-medium text-slate-400">{profileModal.client.phone}</span>
+                                                            {profileModal.client.isSubscriber && (
+                                                                <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-blue-500 text-white select-none">ASSINANTE</span>
+                                                            )}
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {profileModal.client.birthDate && !isEditingProfile && (
+                                        <div className="mt-4 pt-4 border-t border-slate-700/50 flex items-center gap-2 text-slate-500">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" /></svg>
+                                            <span className="text-xs font-medium">Aniversário em: {formatDate(profileModal.client.birthDate)}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* CONTROLE DE ASSINATURA */}
+                                {profileModal.client.isSubscriber && (
+                                    <div className="bg-slate-900 border border-blue-500/20 rounded-2xl p-6">
+                                        <h5 className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-4">Gestão de Assinatura</h5>
+                                        <div className="flex flex-col gap-4">
+                                            <div className="flex items-baseline justify-between p-4 bg-slate-800/50 rounded-xl border border-slate-700">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-slate-500 uppercase">Status do Pagamento</p>
+                                                    <p className={`text-sm font-bold mt-1 ${profileModal.client.subscriptionStatus === 'active' ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                        {profileModal.client.subscriptionStatus === 'active' ? '● Em dia' : '● Pagamento Atrasado'}
+                                                    </p>
+                                                </div>
+                                                <button 
+                                                    onClick={() => handleTogglePaymentStatus(profileModal.client.id, profileModal.client.subscriptionStatus)}
+                                                    className="text-[9px] font-bold border border-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors"
+                                                >
+                                                    {profileModal.client.subscriptionStatus === 'active' ? 'MARCAR COMO ATRASADO' : 'MARCAR COMO EM DIA'}
+                                                </button>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleRemoveSubscription(profileModal.client.id)}
+                                                className="w-full py-2.5 rounded-xl text-[10px] font-bold bg-red-600/10 text-red-500 border border-red-600/20 hover:bg-red-600/20 transition-all"
+                                            >
+                                                CANCELAR ASSINATURA RECORRENTE
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* HISTÓRICO DE COMANDAS */}
+                                <div className="space-y-4">
+                                    <div className="flex items-baseline justify-between">
+                                        <h5 className="text-xs font-bold text-slate-100 uppercase tracking-widest">Últimas 10 Comandas</h5>
+                                        <span className="text-[10px] text-slate-500 font-bold">{profileModal.orders.length} comandas no total</span>
+                                    </div>
+
+                                    {profileLoading ? (
+                                        <div className="flex py-10 justify-center"><div className="w-5 h-5 border-2 border-slate-700 border-t-red-600 rounded-full animate-spin" /></div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {profileModal.orders.length > 0 ? (
+                                                profileModal.orders.map((o) => (
+                                                    <div key={o.id} className="bg-slate-900 p-4 rounded-xl border border-slate-700/50 flex items-center justify-between group">
+                                                        <div>
+                                                            <p className="text-sm font-bold text-slate-200">{formatDate(new Date(o.closed_at))}</p>
+                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                <span className="text-[10px] text-slate-500 uppercase font-bold">{o.payment_method === 'pix' ? 'PIX' : 'Dinheiro'}</span>
+                                                                <span className="w-1 h-1 bg-slate-700 rounded-full" />
+                                                                <span className="text-[10px] text-slate-600">Comanda definitiva</span>
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-sm font-bold text-red-500 group-hover:scale-105 transition-transform">{formatBRL(o.total_amount)}</p>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="bg-slate-900 border border-slate-700 border-dashed p-10 rounded-2xl text-center">
+                                                    <p className="text-xs text-slate-500 italic">Nenhuma comanda registrada para este cliente.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* PERIGO */}
+                                <div className="pt-8 mt-4 border-t border-slate-700">
+                                    <button 
+                                        onClick={handleDeleteClient}
+                                        className="w-full py-3.5 rounded-xl text-xs font-bold text-slate-500 hover:text-red-500 hover:bg-red-500/5 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                                        Excluir Cliente Permanentemente
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+        </main>
     );
 }

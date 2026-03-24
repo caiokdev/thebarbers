@@ -14,6 +14,11 @@ import Configuracoes from './pages/Configuracoes';
 import AgendamentoPublico from './pages/AgendamentoPublico';
 import Automacoes from './pages/Automacoes';
 import Planos from './pages/Planos';
+import Login from './pages/Login';
+import NotFound from './pages/NotFound';
+import PrivateRoute from './components/PrivateRoute';
+import Layout from './components/Layout';
+import { GlobalDataProvider } from './context/GlobalDataContext';
 
 function App() {
     return (
@@ -21,19 +26,33 @@ function App() {
             <BrowserRouter>
                 <Toaster position="top-right" richColors />
                 <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/agenda" element={<Agenda />} />
-                    <Route path="/pdv/:id" element={<PDV />} />
-                    <Route path="/financeiro" element={<Financeiro />} />
-                    <Route path="/historico-comissoes" element={<HistoricoComissoes />} />
-                    <Route path="/clientes" element={<Clientes />} />
-                    <Route path="/estoque" element={<Estoque />} />
-                    <Route path="/relatorios" element={<Relatorios />} />
-                    <Route path="/configuracoes" element={<Configuracoes />} />
-                    <Route path="/automacoes" element={<Automacoes />} />
-                    <Route path="/planos" element={<Planos />} />
+                    {/* Public Routes */}
+                    <Route path="/login" element={<Login />} />
                     <Route path="/agendar" element={<AgendamentoPublico />} />
-                    <Route path="*" element={<Navigate to="/" replace />} />
+
+                    {/* Protected Admin Routes */}
+                    <Route element={
+                        <PrivateRoute>
+                            <GlobalDataProvider>
+                                <Layout />
+                            </GlobalDataProvider>
+                        </PrivateRoute>
+                    }>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/agenda" element={<Agenda />} />
+                        <Route path="/pdv/:id" element={<PDV />} />
+                        <Route path="/financeiro" element={<Financeiro />} />
+                        <Route path="/historico-comissoes" element={<HistoricoComissoes />} />
+                        <Route path="/clientes" element={<Clientes />} />
+                        <Route path="/estoque" element={<Estoque />} />
+                        <Route path="/relatorios" element={<Relatorios />} />
+                        <Route path="/configuracoes" element={<Configuracoes />} />
+                        <Route path="/automacoes" element={<Automacoes />} />
+                        <Route path="/planos" element={<Planos />} />
+                    </Route>
+                    
+                    {/* Fallback */}
+                    <Route path="*" element={<NotFound />} />
                 </Routes>
             </BrowserRouter>
         </ThemeProvider>

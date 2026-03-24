@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
+import { formatDate, formatTime, getLocalDateISO } from '../utils/dateUtils';
+import { formatCurrency } from '../utils/orderUtils';
+import { useGlobalData } from '../context/GlobalDataContext';
 
-const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatBRL = (v) => formatCurrency(v);
 
 export default function Estoque() {
-    const [barbershopId, setBarbershopId] = useState(null);
+    const { adminProfile, loading: globalLoading } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -36,20 +39,6 @@ export default function Estoque() {
     const [showNewProductModal, setShowNewProductModal] = useState(false);
     const [newProduct, setNewProduct] = useState({ name: '', price: '', current_stock: '', min_stock: '', repurchase_days: 30 });
     const [savingNewProduct, setSavingNewProduct] = useState(false);
-
-    // ── Fetch barbershop_id ──
-    useEffect(() => {
-        async function fetchShop() {
-            const { data: shop } = await supabase
-                .from('barbershops')
-                .select('id')
-                .limit(1)
-                .single();
-            if (shop) setBarbershopId(shop.id);
-            else setLoading(false);
-        }
-        fetchShop();
-    }, []);
 
     // ── Master fetch ──
     const fetchData = useCallback(async () => {
@@ -261,14 +250,11 @@ export default function Estoque() {
     // ── Render ──
     if (loading && products.length === 0) {
         return (
-            <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-                <Sidebar />
-                <main className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
-                        <p className="text-slate-500 text-sm">Carregando estoque...</p>
-                    </div>
-                </main>
+            <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4"></div>
+                    <p className="text-slate-500 text-sm">Carregando estoque...</p>
+                </div>
             </div>
         );
     }
@@ -276,8 +262,7 @@ export default function Estoque() {
     const medals = ['🥇', '🥈', '🥉'];
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
+        <>
             <main className="flex-1 flex flex-col h-full overflow-hidden">
                 {/* ── HEADER ── */}
                 <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center justify-between px-8 flex-shrink-0">
@@ -357,7 +342,7 @@ export default function Estoque() {
                                 Produtos Mais Vendidos
                             </h2>
                             <p className="text-[10px] text-slate-500 mb-4">
-                                {new Date(selectedPeriod + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                                {new Date(selectedPeriod + '-02T12:00:00Z').toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', month: 'long', year: 'numeric' })}
                             </p>
                             {topProducts.length === 0 ? (
                                 <div className="flex items-center justify-center h-40 text-slate-600 text-sm">
@@ -723,6 +708,6 @@ export default function Estoque() {
                     </div>
                 </div>
             )}
-        </div>
+        </>
     );
 }

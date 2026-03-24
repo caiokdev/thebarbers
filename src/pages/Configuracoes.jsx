@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -32,8 +32,9 @@ const DEFAULT_HOURS = DAYS.map(d => ({
 
 export default function Configuracoes() {
     const { theme, themeColor, updateThemeColor, THEME_COLORS } = useTheme();
+    const { adminProfile, loading: globalLoading, refreshData } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
     const [activeTab, setActiveTab] = useState('geral');
-    const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const [shopData, setShopData] = useState({ name: '', address: '', phone: '', logo: '' });
@@ -59,21 +60,19 @@ export default function Configuracoes() {
 
     // ── Init ──
     useEffect(() => {
-        async function init() {
-            const { data: shop } = await supabase
-                .from('barbershops')
-                .select('*')
-                .limit(1)
-                .single();
-            if (shop) {
-                setBarbershopId(shop.id);
-                const localLogo = localStorage.getItem('shop_logo') || '';
-                setShopData({ name: shop.name || '', address: shop.address || '', phone: shop.phone || '', logo: localLogo });
-            }
+        if (adminProfile) {
+            const localLogo = localStorage.getItem('shop_logo') || '';
+            setShopData({ 
+                name: adminProfile.barbershopName || '', 
+                address: adminProfile.barbershopAddress || '', 
+                phone: adminProfile.barbershopPhone || '', 
+                logo: localLogo 
+            });
+            setLoading(false);
+        } else if (!globalLoading) {
             setLoading(false);
         }
-        init();
-    }, []);
+    }, [adminProfile, globalLoading]);
 
     // ── Fetch all data when barbershopId is ready ──
     const fetchAll = useCallback(async () => {
@@ -137,6 +136,7 @@ export default function Configuracoes() {
             window.dispatchEvent(new Event('shop_logo_updated'));
 
             toast.success('Dados salvos com sucesso!');
+            refreshData();
         } catch (err) {
             toast.error(`Erro: ${err.message}`);
         } finally {
@@ -174,6 +174,7 @@ export default function Configuracoes() {
                 setBusinessHours(data.sort((a, b) => a.day_of_week - b.day_of_week));
             }
             toast.success('Horários salvos com sucesso!');
+            refreshData();
         } catch (err) {
             toast.error(`Erro: ${err.message}`);
         } finally {
@@ -211,6 +212,7 @@ export default function Configuracoes() {
             }
             setShowServiceModal(false);
             fetchAll();
+            refreshData();
         } catch (err) {
             toast.error(`Erro: ${err.message}`);
         } finally {
@@ -249,6 +251,7 @@ export default function Configuracoes() {
             }
             setShowProModal(false);
             fetchAll();
+            refreshData();
         } catch (err) {
             toast.error(`Erro: ${err.message}`);
         } finally {
@@ -261,6 +264,7 @@ export default function Configuracoes() {
             const { error } = await supabase.from('professionals').delete().eq('id', pro.id);
             if (error) throw error;
             fetchAll();
+            refreshData();
         } catch (err) {
             toast.error(`Erro ao excluir: ${err.message}`);
         }
@@ -273,23 +277,19 @@ export default function Configuracoes() {
     };
 
     // ── Loading ──
-    if (loading) {
+    if (loading || globalLoading) {
         return (
-            <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-                <Sidebar />
-                <main className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4" />
-                        <p className="text-slate-500 text-sm">Carregando configurações...</p>
-                    </div>
-                </main>
+            <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4" />
+                    <p className="text-slate-500 text-sm">Carregando configurações...</p>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
+        <>
             <main className="flex-1 flex flex-col h-full overflow-hidden">
                 {/* ── HEADER ── */}
                 <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center justify-between px-8 flex-shrink-0">
@@ -691,6 +691,6 @@ export default function Configuracoes() {
                     </div>
                 </div>
             )}
-        </div>
+        </>
     );
 }

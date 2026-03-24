@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -57,7 +57,8 @@ const DEFAULT_PLANS = [
 
 export default function Planos() {
     const { theme } = useTheme();
-    const [barbershopId, setBarbershopId] = useState(null);
+    const { adminProfile, loading: globalLoading, refreshData } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
     const [loading, setLoading] = useState(true);
 
     const [dbPlans, setDbPlans] = useState([]);
@@ -81,20 +82,6 @@ export default function Planos() {
     const [allClients, setAllClients] = useState([]);
     const [checkoutCardInfo, setCheckoutCardInfo] = useState({ name: '', number: '', exp: '', cvv: '' });
     const [checkingOut, setCheckingOut] = useState(false);
-
-    // Initial load
-    useEffect(() => {
-        async function fetchShop() {
-            const { data: shop } = await supabase
-                .from('barbershops')
-                .select('id')
-                .limit(1)
-                .single();
-            if (shop) setBarbershopId(shop.id);
-            else setLoading(false);
-        }
-        fetchShop();
-    }, []);
 
     const fetchPlans = useCallback(async () => {
         if (!barbershopId) return;
@@ -167,6 +154,7 @@ export default function Planos() {
             
             setShowEditModal(false);
             fetchPlans();
+            if (refreshData) refreshData();
         } catch (err) {
             toast.error(`Erro ao salvar: ${err.message}`);
         } finally {
@@ -214,12 +202,9 @@ export default function Planos() {
         try {
             const validUntilIso = new Date(subForm.valid_until + 'T23:59:59').toISOString();
             
-            // Priority for manual status override, but still auto-calculate if manual is 'active' 
-            // but the date is in the past. If manual is 'overdue', it stays 'overdue'.
             const dateIsOverdue = new Date(subForm.valid_until + 'T23:59:59') < new Date();
             const newStatus = (subForm.status === 'overdue' || dateIsOverdue) ? 'overdue' : 'active';
             
-            // 1. Update client_subscriptions
             const { error: subErr } = await supabase.from('client_subscriptions').update({
                 haircuts_used: parseInt(subForm.haircuts_used, 10),
                 shaves_used: parseInt(subForm.shaves_used, 10),
@@ -228,7 +213,6 @@ export default function Planos() {
             }).eq('id', subDetails.id);
             if (subErr) throw subErr;
 
-            // 2. Update clients table
             const { error: clientErr } = await supabase.from('clients').update({
                 subscription_status: newStatus
             }).eq('id', selectedSubscriber.id);
@@ -236,7 +220,8 @@ export default function Planos() {
 
             toast.success('Assinatura atualizada com sucesso!');
             setSelectedSubscriber(null);
-            fetchPlans(); // Refresh the list
+            fetchPlans();
+            if (refreshData) refreshData();
         } catch (err) {
             toast.error(`Erro ao atualizar assinatura: ${err.message}`);
         } finally {
@@ -253,14 +238,11 @@ export default function Planos() {
             let newValid = new Date();
 
             if (currentValid > now) {
-                // Add 30 days to existing valid_until
                 newValid = new Date(currentValid.setDate(currentValid.getDate() + 30));
             } else {
-                // Subscription is overdue, start 30 days from now
                 newValid.setDate(now.getDate() + 30);
             }
 
-            // Update client_subscriptions
             const { error: subErr } = await supabase.from('client_subscriptions').update({
                 haircuts_used: 0,
                 shaves_used: 0,
@@ -269,7 +251,6 @@ export default function Planos() {
             }).eq('id', subDetails.id);
             if (subErr) throw subErr;
 
-            // Update clients status to fix desync / sync
             const { error: clientErr } = await supabase.from('clients').update({
                 subscription_status: 'active'
             }).eq('id', selectedSubscriber.id);
@@ -278,6 +259,7 @@ export default function Planos() {
             toast.success('Assinatura renovada (zerada) com sucesso para mais 30 dias!');
             setSelectedSubscriber(null);
             fetchPlans();
+            if (refreshData) refreshData();
         } catch (err) {
             toast.error(`Erro ao renovar: ${err.message}`);
         } finally {
@@ -291,14 +273,12 @@ export default function Planos() {
         
         setSaving(true);
         try {
-            // 1. Remove from client_subscriptions
             const { error: subErr } = await supabase
                 .from('client_subscriptions')
                 .delete()
                 .eq('id', subDetails.id);
             if (subErr) throw subErr;
 
-            // 2. Update client record
             const { error: clientErr } = await supabase
                 .from('clients')
                 .update({ is_subscriber: false, subscription_status: 'none' })
@@ -308,6 +288,7 @@ export default function Planos() {
             toast.success('Assinatura cancelada com sucesso.');
             setSelectedSubscriber(null);
             fetchPlans();
+            if (refreshData) refreshData();
         } catch (err) {
             toast.error(`Erro ao cancelar assinatura: ${err.message}`);
         } finally {
@@ -337,15 +318,11 @@ export default function Planos() {
         setCheckingOut(true);
         try {
             const client = selectedClient;
-
-            // 2. Call our Edge Function to register the subscription on Celcoin
             const existingPlan = dbPlans.find(db => db.name === checkoutPlan.name);
             const planValue = existingPlan ? existingPlan.price : 0;
 
             const { data: { session } } = await supabase.auth.getSession();
             
-            // In a real scenario, you'd send the card *token* generated by Celcoin JS SDK, not raw data
-            // For now, we mock the Celcoin call via edge function
             const response = await fetch(`${supabase.supabaseUrl}/functions/v1/celcoin-subscription`, {
                 method: 'POST',
                 headers: {
@@ -355,7 +332,7 @@ export default function Planos() {
                 body: JSON.stringify({
                     clientId: client.id,
                     planValue: planValue,
-                    celcoinToken: "mock_card_token_from_front" // Celcoin JS token would go here
+                    celcoinToken: "mock_card_token_from_front"
                 })
             });
 
@@ -364,7 +341,6 @@ export default function Planos() {
                 throw new Error(result.error || "Erro ao processar assinatura na Celcoin");
             }
 
-            // 3. Create or Update client_subscriptions record
             const { data: existingSub } = await supabase
                 .from('client_subscriptions')
                 .select('id')
@@ -391,7 +367,6 @@ export default function Planos() {
                 }).eq('client_id', client.id);
             }
 
-            // 3. Mark client as subscriber if they aren't already
             await supabase.from('clients').update({
                 is_subscriber: true,
                 subscription_status: 'active'
@@ -399,7 +374,8 @@ export default function Planos() {
 
             toast.success("Assinatura criada com sucesso! A cobrança recorrente foi ativada.");
             setCheckoutPlan(null);
-            fetchPlans(); // Refresh the subscriber list
+            fetchPlans();
+            if (refreshData) refreshData();
         } catch (err) {
             toast.error(`Erro no Checkout: ${err.message}`);
         } finally {
@@ -407,168 +383,160 @@ export default function Planos() {
         }
     };
 
-    if (loading) {
+    if (loading || globalLoading) {
         return (
-            <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-                <Sidebar />
-                <main className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4" />
-                        <p className="text-slate-500 text-sm">Carregando planos...</p>
-                    </div>
-                </main>
+            <div className="flex h-full items-center justify-center p-12">
+                <div className="text-center">
+                    <div className="inline-block w-10 h-10 border-4 border-slate-700 border-t-red-600 rounded-full animate-spin mb-4" />
+                    <p className="text-slate-500 text-sm">Carregando planos...</p>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
-            
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
-                {/* ── HEADER ── */}
-                <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center px-8 flex-shrink-0">
-                    <div>
-                        <h1 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-                            Planos de Assinatura
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-yellow-500/20 text-yellow-500 uppercase tracking-widest border border-yellow-500/20">
-                                Premium
-                            </span>
-                        </h1>
-                        <p className="text-xs text-slate-500 mt-1">Configure os preços dos planos mensais oferecidos aos seus clientes</p>
-                    </div>
-                </header>
+        <div className="max-w-7xl mx-auto space-y-12">
+            {/* ── HEADER CONTENT ── */}
+            <div className="bg-slate-800/50 border border-slate-700/50 p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+                        Planos de Assinatura
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-yellow-500/20 text-yellow-500 uppercase tracking-widest border border-yellow-500/20">
+                            Premium
+                        </span>
+                    </h1>
+                    <p className="text-sm text-slate-400 mt-1">Configure os preços e gerencie as assinaturas dos seus clientes</p>
+                </div>
+            </div>
 
-                <div className="flex-1 overflow-y-auto p-8 border-t border-white/5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                        {DEFAULT_PLANS.map(planDef => {
-                            const existing = dbPlans.find(db => db.name === planDef.name);
-                            const currentPrice = existing ? existing.price : 0;
-                            const isActive = !!existing;
+            {/* ── PLANS GRID ── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {DEFAULT_PLANS.map(planDef => {
+                    const existing = dbPlans.find(db => db.name === planDef.name);
+                    const currentPrice = existing ? existing.price : 0;
+                    const isActive = !!existing;
 
-                            return (
-                                <div key={planDef.key} className="relative group bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden hover:border-slate-500 transition-all duration-300 shadow-xl flex flex-col">
-                                    <div className="absolute top-0 right-0 p-6 opacity-20 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
-                                        {planDef.icon}
+                    return (
+                        <div key={planDef.key} className="relative group bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden hover:border-slate-500 transition-all duration-300 shadow-xl flex flex-col">
+                            <div className="absolute top-0 right-0 p-6 opacity-20 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
+                                {planDef.icon}
+                            </div>
+                            <div className="p-8 pb-6 flex-1">
+                                <div className={`w-14 h-14 rounded-2xl ${planDef.bgIcon} flex items-center justify-center mb-6`}>
+                                    {planDef.icon}
+                                </div>
+                                <h3 className="text-2xl font-bold text-white mb-2">{planDef.name}</h3>
+                                <p className="text-sm text-slate-400 mb-6 min-h-[40px] leading-relaxed">{planDef.description}</p>
+                                
+                                <div className="space-y-3 mb-8">
+                                    <div className="flex items-center gap-3 text-sm text-slate-300">
+                                        <svg className="w-5 h-5 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                        <span>{planDef.haircut_limit} Cortes por mês</span>
                                     </div>
-                                    <div className="p-8 pb-6 flex-1">
-                                        <div className={`w-14 h-14 rounded-2xl ${planDef.bgIcon} flex items-center justify-center mb-6`}>
-                                            {planDef.icon}
-                                        </div>
-                                        <h3 className="text-2xl font-bold text-white mb-2">{planDef.name}</h3>
-                                        <p className="text-sm text-slate-400 mb-6 min-h-[40px] leading-relaxed">{planDef.description}</p>
-                                        
-                                        <div className="space-y-3 mb-8">
-                                            <div className="flex items-center gap-3 text-sm text-slate-300">
-                                                <svg className="w-5 h-5 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                                <span>{planDef.haircut_limit} Cortes por mês</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 text-sm text-slate-300">
-                                                <svg className="w-5 h-5 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                                <span>{planDef.shave_limit} Barbas por mês</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 text-sm text-slate-300 opacity-60">
-                                                <svg className="w-5 h-5 text-slate-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                                <span>Validade de 30 dias</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-end gap-2 mb-2">
-                                            <span className="text-3xl font-black text-white">{formatBRL(currentPrice)}</span>
-                                            <span className="text-sm text-slate-500 font-medium mb-1.5">/mês</span>
-                                        </div>
+                                    <div className="flex items-center gap-3 text-sm text-slate-300">
+                                        <svg className="w-5 h-5 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                        <span>{planDef.shave_limit} Barbas por mês</span>
                                     </div>
-
-                                    <div className="p-4 bg-slate-900/50 border-t border-slate-700/50 mt-auto flex flex-col gap-2">
-                                        <button 
-                                            onClick={() => openEditModal(planDef)}
-                                            className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center justify-center gap-2 border border-slate-700"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
-                                            {isActive ? 'Alterar Preço' : 'Definir Preço'}
-                                        </button>
-                                        <button 
-                                            onClick={() => openCheckout(planDef)}
-                                            title="Assinar para um cliente"
-                                            className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-black/20 flex items-center justify-center gap-2"
-                                        >
-                                            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                                            </svg>
-                                            Assinar Plano
-                                        </button>
+                                    <div className="flex items-center gap-3 text-sm text-slate-300 opacity-60">
+                                        <svg className="w-5 h-5 text-slate-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                        <span>Validade de 30 dias</span>
                                     </div>
                                 </div>
-                            );
-                        })}
-                    </div>
 
-                    {/* ════════ SUBSCRIBERS LIST ════════ */}
-                    <div className="max-w-7xl mx-auto mt-12 bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl mb-12">
-                        <div className="p-6 border-b border-slate-700 flex items-center justify-between">
-                            <div>
-                                <h2 className="text-xl font-bold text-white">Assinantes do Clube</h2>
-                                <p className="text-sm text-slate-400 mt-1">Todos os clientes com assinatura ativa ou atrasada</p>
+                                <div className="flex items-end gap-2 mb-2">
+                                    <span className="text-3xl font-black text-white">{formatBRL(currentPrice)}</span>
+                                    <span className="text-sm text-slate-500 font-medium mb-1.5">/mês</span>
+                                </div>
                             </div>
-                            <div className="px-4 py-2 bg-slate-900 rounded-xl border border-slate-700 flex items-center gap-2 shadow-inner">
-                                <span className="text-sm text-slate-400 font-medium">Total de Assinantes:</span>
-                                <span className="text-lg font-bold text-white">{subscribers.length}</span>
+
+                            <div className="p-4 bg-slate-900/50 border-t border-slate-700/50 mt-auto flex flex-col gap-2">
+                                <button 
+                                    onClick={() => openEditModal(planDef)}
+                                    className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center justify-center gap-2 border border-slate-700"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
+                                    {isActive ? 'Alterar Preço' : 'Definir Preço'}
+                                </button>
+                                <button 
+                                    onClick={() => openCheckout(planDef)}
+                                    title="Assinar para um cliente"
+                                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-black/20 flex items-center justify-center gap-2"
+                                >
+                                    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                    </svg>
+                                    Assinar Plano
+                                </button>
                             </div>
                         </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-slate-900/50">
-                                    <tr>
-                                        <th className="px-8 py-4 font-semibold text-slate-400 uppercase tracking-wider text-[11px] w-1/3">Cliente</th>
-                                        <th className="px-8 py-4 font-semibold text-slate-400 uppercase tracking-wider text-[11px] w-1/3">Contato</th>
-                                        <th className="px-8 py-4 font-semibold text-slate-400 uppercase tracking-wider text-[11px] w-1/3">Status da Assinatura</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-700/50">
-                                    {subscribers.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={3} className="px-8 py-12 text-center text-slate-500">
-                                                Nenhum assinante cadastrado nesta barbearia.
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        subscribers.map(sub => (
-                                            <tr key={sub.id} onClick={() => openSubscriberDetails(sub)} className="hover:bg-slate-700/30 transition-colors cursor-pointer group">
-                                                <td className="px-8 py-4 border-l-4 border-transparent group-hover:border-red-500 transition-colors">
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-300 flex-shrink-0 border border-slate-600 shadow-sm">
-                                                            {(sub.name || 'Sem Nome').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
-                                                        </div>
-                                                        <span className="font-semibold text-slate-200">{sub.name || 'Sem Nome'}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-8 py-4 text-slate-400 font-medium tracking-wide">
-                                                    {sub.phone || '—'}
-                                                </td>
-                                                <td className="px-8 py-4">
-                                                    {sub.subscription_status === 'overdue' ? (
-                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-600/10 text-red-500 border border-red-500/20 shadow-sm">
-                                                            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                                                            Atrasado
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
-                                                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                                                            Em dia
-                                                        </span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                    );
+                })}
+            </div>
+
+            {/* ── SUBSCRIBERS LIST ── */}
+            <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+                <div className="p-6 border-b border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-white">Assinantes do Clube</h2>
+                        <p className="text-sm text-slate-400 mt-1">Todos os clientes com assinatura ativa ou atrasada</p>
+                    </div>
+                    <div className="px-4 py-2 bg-slate-900 rounded-xl border border-slate-700 flex items-center gap-2 shadow-inner">
+                        <span className="text-sm text-slate-400 font-medium">Total:</span>
+                        <span className="text-lg font-bold text-white">{subscribers.length}</span>
                     </div>
                 </div>
-            </main>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-900/50">
+                            <tr>
+                                <th className="px-8 py-4 font-semibold text-slate-400 uppercase tracking-wider text-[11px]">Cliente</th>
+                                <th className="px-8 py-4 font-semibold text-slate-400 uppercase tracking-wider text-[11px]">Contato</th>
+                                <th className="px-8 py-4 font-semibold text-slate-400 uppercase tracking-wider text-[11px]">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700/50">
+                            {subscribers.length === 0 ? (
+                                <tr>
+                                    <td colSpan={3} className="px-8 py-12 text-center text-slate-500">
+                                        Nenhum assinante cadastrado.
+                                    </td>
+                                </tr>
+                            ) : (
+                                subscribers.map(sub => (
+                                    <tr key={sub.id} onClick={() => openSubscriberDetails(sub)} className="hover:bg-slate-700/30 transition-colors cursor-pointer group">
+                                        <td className="px-8 py-4 border-l-4 border-transparent group-hover:border-red-500 transition-colors">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-300 flex-shrink-0 border border-slate-600 shadow-sm">
+                                                    {(sub.name || '??').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
+                                                </div>
+                                                <span className="font-semibold text-slate-200">{sub.name || 'Sem Nome'}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-8 py-4 text-slate-400 font-medium">
+                                            {sub.phone || '—'}
+                                        </td>
+                                        <td className="px-8 py-4">
+                                            {sub.subscription_status === 'overdue' ? (
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-600/10 text-red-500 border border-red-500/20 shadow-sm">
+                                                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                                                    Atrasado
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
+                                                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                                    Em dia
+                                                </span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
-            {/* ════════ EDIT PRICE MODAL ════════ */}
+            {/* ── MODALS ── */}
             {showEditModal && editingPlanDef && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowEditModal(false)}></div>
@@ -578,10 +546,7 @@ export default function Planos() {
                                 {editingPlanDef.icon}
                             </div>
                             <h3 className="text-xl font-bold text-white mb-2">{editingPlanDef.name}</h3>
-                            <p className="text-sm text-slate-400 mb-8 leading-relaxed">
-                                {editingPlanDef.description}
-                            </p>
-
+                            <p className="text-sm text-slate-400 mb-8 leading-relaxed">{editingPlanDef.description}</p>
                             <div className="w-full text-left mb-8 relative">
                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 ml-1">Preço Mensal (R$)</label>
                                 <input
@@ -597,7 +562,6 @@ export default function Planos() {
                                     autoFocus
                                 />
                             </div>
-
                             <div className="flex w-full gap-3">
                                 <button onClick={() => setShowEditModal(false)} disabled={saving} className="flex-1 py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold transition-colors disabled:opacity-50">
                                     Cancelar
@@ -612,12 +576,10 @@ export default function Planos() {
                 </div>
             )}
 
-            {/* ════════ SUBSCRIBER DETAILS MODAL ════════ */}
             {selectedSubscriber && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedSubscriber(null)}></div>
                     <div className="relative bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                        {/* Status Header */}
                         <div className={`px-6 py-4 flex items-center justify-between border-b ${
                             selectedSubscriber.subscription_status === 'overdue' 
                             ? 'bg-red-500/10 border-red-500/20' 
@@ -628,16 +590,11 @@ export default function Planos() {
                                 <p className="text-sm text-slate-400">{selectedSubscriber.phone || 'Sem telefone'}</p>
                             </div>
                             {selectedSubscriber.subscription_status === 'overdue' ? (
-                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-red-600 text-white shadow-sm">
-                                    Atrasado
-                                </span>
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-red-600 text-white shadow-sm">Atrasado</span>
                             ) : (
-                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white shadow-sm">
-                                    Em Dia
-                                </span>
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500 text-white shadow-sm">Em Dia</span>
                             )}
                         </div>
-
                         <div className="p-6 overflow-y-auto flex-1">
                             {detailsLoading ? (
                                 <div className="flex justify-center py-12">
@@ -645,298 +602,120 @@ export default function Planos() {
                                 </div>
                             ) : !subDetails ? (
                                 <div className="text-center py-8">
-                                    <p className="text-slate-400 text-sm mb-4">Nenhum registro de controle de assinatura encontrado para este cliente.</p>
-                                    <p className="text-xs text-slate-500">Isso pode ocorrer em assinantes muito antigos. Desmarque e marque-o como assinante novamente na página de Clientes para recriar o vínculo.</p>
+                                    <p className="text-slate-400 text-sm mb-4">Nenhum registro de controle de assinatura encontrado.</p>
                                 </div>
                             ) : (
                                 <div className="space-y-6">
                                     <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 flex items-center justify-between">
                                         <div>
-                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">DETALHES DO PLANO</p>
-                                            <p className="text-lg font-semibold text-slate-100">{subDetails.plans?.name || 'Plano customizado (sem tipo)'}</p>
+                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">PLANO</p>
+                                            <p className="text-lg font-semibold text-slate-100">{subDetails.plans?.name || 'Vustomizado'}</p>
                                             <div className="flex items-center gap-2 mt-1">
-                                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Forma de Pagamento:</span>
+                                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Pagamento:</span>
                                                 <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 text-[10px] font-bold border border-emerald-500/20 uppercase">
                                                     {subDetails.payment_method || 'PIX'}
                                                 </span>
                                             </div>
                                         </div>
-                                        <button 
-                                            onClick={handleCancelSubscription}
-                                            disabled={saving}
-                                            className="px-3 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-[10px] font-bold rounded-lg border border-red-500/20 transition-colors flex items-center gap-1.5"
-                                        >
-                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                            CANCELAR PLANO
-                                        </button>
+                                        <button onClick={handleCancelSubscription} disabled={saving} className="px-3 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-[10px] font-bold rounded-lg border border-red-500/20 transition-colors uppercase">Cancelar Plano</button>
                                     </div>
-
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700">
-                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Cortes no mês</p>
+                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Cortes</p>
                                             <div className="flex items-center gap-3">
-                                                {(subDetails.plans?.haircut_limit ?? 0) === 0 ? (
-                                                    <div className="flex items-center gap-2 text-slate-500">
-                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                                                        <span className="text-xs font-semibold">Não incluso</span>
-                                                    </div>
-                                                ) : (
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max="100"
-                                                        value={subForm.haircuts_used}
-                                                        onChange={e => setSubForm({...subForm, haircuts_used: Math.min(Number(e.target.value), subDetails.plans?.haircut_limit ?? 9999)})}
-                                                        className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-2 text-center text-white font-bold focus:outline-none focus:border-red-500"
-                                                    />
-                                                )}
-                                                <span className="text-slate-400 text-sm font-medium">/ {subDetails.plans?.haircut_limit || 0} max</span>
+                                                <input
+                                                    type="number"
+                                                    value={subForm.haircuts_used}
+                                                    onChange={e => setSubForm({...subForm, haircuts_used: Math.min(Number(e.target.value), subDetails.plans?.haircut_limit ?? 9999)})}
+                                                    className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-2 text-center text-white font-bold focus:outline-none focus:border-red-500"
+                                                />
+                                                <span className="text-slate-400 text-sm">/ {subDetails.plans?.haircut_limit || 0}</span>
                                             </div>
                                         </div>
                                         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700">
-                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Barbas no mês</p>
+                                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Barbas</p>
                                             <div className="flex items-center gap-3">
-                                                {(subDetails.plans?.shave_limit ?? 0) === 0 ? (
-                                                    <div className="flex items-center gap-2 text-slate-500">
-                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                                                        <span className="text-xs font-semibold">Não incluso</span>
-                                                    </div>
-                                                ) : (
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max={subDetails.plans?.shave_limit ?? undefined}
-                                                        value={subForm.shaves_used}
-                                                        onChange={e => setSubForm({...subForm, shaves_used: Math.min(Number(e.target.value), subDetails.plans?.shave_limit ?? 9999)})}
-                                                        className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-2 text-center text-white font-bold focus:outline-none focus:border-red-500"
-                                                    />
-                                                )}
-                                                <span className="text-slate-400 text-sm font-medium">/ {subDetails.plans?.shave_limit || 0} max</span>
+                                                <input
+                                                    type="number"
+                                                    value={subForm.shaves_used}
+                                                    onChange={e => setSubForm({...subForm, shaves_used: Math.min(Number(e.target.value), subDetails.plans?.shave_limit ?? 9999)})}
+                                                    className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-2 text-center text-white font-bold focus:outline-none focus:border-red-500"
+                                                />
+                                                <span className="text-slate-400 text-sm">/ {subDetails.plans?.shave_limit || 0}</span>
                                             </div>
                                         </div>
                                     </div>
-
-                                     {/* Situação da Assinatura Seletor */}
                                     <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700">
-                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Situação da Assinatura</p>
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Situação</p>
                                         <div className="flex p-1 bg-slate-800 rounded-xl border border-slate-700">
-                                            <button 
-                                                onClick={() => setSubForm({...subForm, status: 'active'})}
-                                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${
-                                                    subForm.status === 'active' 
-                                                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
-                                                    : 'text-slate-500 hover:text-slate-300'
-                                                }`}
-                                            >
-                                                <div className={`w-1.5 h-1.5 rounded-full ${subForm.status === 'active' ? 'bg-white' : 'bg-slate-600'}`}></div>
-                                                Em Dia
-                                            </button>
-                                            <button 
-                                                onClick={() => setSubForm({...subForm, status: 'overdue'})}
-                                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${
-                                                    subForm.status === 'overdue' 
-                                                    ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
-                                                    : 'text-slate-500 hover:text-slate-300'
-                                                }`}
-                                            >
-                                                <div className={`w-1.5 h-1.5 rounded-full ${subForm.status === 'overdue' ? 'bg-white' : 'bg-slate-600'} ${subForm.status === 'overdue' ? 'animate-pulse' : ''}`}></div>
-                                                Atrasado
-                                            </button>
+                                            <button onClick={() => setSubForm({...subForm, status: 'active'})} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${subForm.status === 'active' ? 'bg-emerald-500 text-white' : 'text-slate-500'}`}>Em Dia</button>
+                                            <button onClick={() => setSubForm({...subForm, status: 'overdue'})} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${subForm.status === 'overdue' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>Atrasado</button>
                                         </div>
                                     </div>
-
-                                    <div className={`bg-slate-900/50 p-4 rounded-2xl border border-slate-700 relative transition-all duration-300 ${
-                                        subForm.status === 'overdue' ? 'opacity-40 grayscale-[0.5] select-none pointer-events-none' : ''
-                                    }`}>
-                                        <div className="flex items-center justify-between mb-2">
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest">Válido até</label>
-                                            {subForm.status === 'overdue' && (
-                                                <span className="text-[10px] bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full font-bold border border-red-500/20">Bloqueado</span>
-                                            )}
-                                        </div>
-                                        <input
-                                            type="date"
-                                            value={subForm.valid_until}
-                                            disabled={subForm.status === 'overdue'}
-                                            onChange={e => setSubForm({...subForm, valid_until: e.target.value})}
-                                            className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-500 transition-colors"
-                                        />
+                                    <div className={`bg-slate-900/50 p-4 rounded-2xl border border-slate-700 ${subForm.status === 'overdue' ? 'opacity-40 pointer-events-none' : ''}`}>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Válido até</label>
+                                        <input type="date" value={subForm.valid_until} onChange={e => setSubForm({...subForm, valid_until: e.target.value})} className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-red-500" />
                                     </div>
-
                                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl">
-                                        <div className="flex items-start gap-3">
-                                            <svg className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                            <p className="text-sm text-slate-300">
-                                                O vencimento atual marca quando o cliente deixará de ser Assinante. Se estiver atrasado, você pode clicar em "Renovar e Zerar" para renovar por +30 dias e zerar a contagem de cortes/barbas.
-                                            </p>
-                                        </div>
-                                        <button 
-                                            onClick={handleRenewSub}
-                                            disabled={saving}
-                                            className="mt-4 w-full py-2.5 bg-yellow-500 hover:bg-yellow-600 text-slate-900 text-sm font-bold rounded-xl transition-colors disabled:opacity-50"
-                                        >
-                                            {saving ? 'Renovando...' : 'Renovar por +30 Dias e Zerar Limites'}
-                                        </button>
+                                        <p className="text-sm text-slate-300 mb-4">Renovação adiciona 30 dias e zera o uso.</p>
+                                        <button onClick={handleRenewSub} disabled={saving} className="w-full py-2.5 bg-yellow-500 hover:bg-yellow-600 text-slate-900 text-sm font-bold rounded-xl transition-colors">Renovar e Zerar</button>
                                     </div>
                                 </div>
                             )}
                         </div>
-
-                        {/* Footer Actions */}
                         <div className="p-6 bg-slate-900/50 border-t border-slate-700 flex gap-3">
-                            <button onClick={() => setSelectedSubscriber(null)} disabled={saving} className="flex-1 py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold transition-colors disabled:opacity-50">
-                                Cancelar
+                            <button onClick={() => setSelectedSubscriber(null)} disabled={saving} className="flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-200 text-sm font-semibold">Cancelar</button>
+                            <button onClick={handleSaveSubDetails} disabled={saving} className="flex-1 py-3.5 rounded-xl bg-red-600 text-white text-sm font-bold flex items-center justify-center gap-2">
+                                {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Salvar Alterações'}
                             </button>
-                            {subDetails && (
-                                <button onClick={handleSaveSubDetails} disabled={saving} className="flex-1 py-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
-                                    {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                    {saving ? 'Salvando...' : 'Salvar Alterações Manuais'}
-                                </button>
-                            )}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* ════════ CHECKOUT MODAL ════════ */}
             {checkoutPlan && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !checkingOut && setCheckoutPlan(null)}></div>
-                    <div className="relative bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-lg p-8 shadow-2xl flex flex-col">
-                        <div className="flex items-center gap-4 mb-6">
-                            <div className={`w-12 h-12 rounded-xl ${checkoutPlan.bgIcon} flex items-center justify-center flex-shrink-0`}>
-                                {checkoutPlan.icon}
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-bold text-white">Assinar {checkoutPlan.name}</h3>
-                                <p className="text-sm text-slate-400">Checkout Celcoin Automático</p>
-                            </div>
-                        </div>
-
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setCheckoutPlan(null)}></div>
+                    <div className="relative bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-lg p-8 shadow-2xl overflow-y-auto max-h-[90vh]">
+                        <h3 className="text-xl font-bold text-white mb-6">Assinar {checkoutPlan.name}</h3>
                         <div className="space-y-5">
                             <div className="relative">
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Cliente (Busca)</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Cliente</label>
                                 <input
                                     type="text"
                                     value={clientSearch}
-                                    onChange={e => {
-                                        setClientSearch(e.target.value);
-                                        setSelectedClient(null);
-                                        setShowClientDropdown(true);
-                                    }}
+                                    onChange={e => { setClientSearch(e.target.value); setSelectedClient(null); setShowClientDropdown(true); }}
                                     onFocus={() => setShowClientDropdown(true)}
-                                    placeholder="Buscar por nome ou telefone..."
+                                    placeholder="Buscar por nome..."
                                     className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
                                 />
-                                {selectedClient && (
-                                    <div className="absolute right-3 top-9 text-xs text-emerald-500">✓ Selecionado</div>
-                                )}
-                                
                                 {showClientDropdown && !selectedClient && (
                                     <div className="absolute z-[70] w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-y-auto max-h-48">
-                                        {allClients
-                                            .filter(c => 
-                                                c.name.toLowerCase().includes(clientSearch.toLowerCase()) || 
-                                                (c.phone && c.phone.includes(clientSearch))
-                                            )
-                                            .slice(0, 10)
-                                            .map(c => (
-                                                <button 
-                                                    key={c.id} 
-                                                    onClick={() => {
-                                                        setSelectedClient(c);
-                                                        setClientSearch(c.name);
-                                                        setShowClientDropdown(false);
-                                                    }}
-                                                    className="w-full text-left px-4 py-3 hover:bg-slate-700 border-b border-slate-700/50 last:border-none flex items-center justify-between group"
-                                                >
-                                                    <div>
-                                                        <p className="text-sm font-semibold text-slate-200 group-hover:text-white">{c.name}</p>
-                                                        <p className="text-[10px] text-slate-500">{c.phone || 'Sem telefone'}</p>
-                                                    </div>
-                                                    {c.is_subscriber && (
-                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">★ Assinante</span>
-                                                    )}
-                                                </button>
-                                            ))
-                                        }
-                                        {allClients.filter(c => 
-                                            c.name.toLowerCase().includes(clientSearch.toLowerCase()) || 
-                                            (c.phone && c.phone.includes(clientSearch))
-                                        ).length === 0 && (
-                                            <div className="px-4 py-3 text-xs text-slate-500 text-center">Nenhum cliente encontrado</div>
-                                        )}
+                                        {allClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).slice(0, 10).map(c => (
+                                            <button key={c.id} onClick={() => { setSelectedClient(c); setClientSearch(c.name); setShowClientDropdown(false); }} className="w-full text-left px-4 py-3 hover:bg-slate-700 border-b border-slate-700/50 last:border-none flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-slate-200">{c.name}</p>
+                                                    <p className="text-[10px] text-slate-500">{c.phone || 'Sem telefone'}</p>
+                                                </div>
+                                                {c.is_subscriber && <span className="text-[9px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded-full border border-yellow-500/20">Assinante</span>}
+                                            </button>
+                                        ))}
                                     </div>
                                 )}
                             </div>
-
                             <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-700 space-y-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Número do Cartão de Crédito</label>
-                                    <input
-                                        type="text"
-                                        maxLength="19"
-                                        value={checkoutCardInfo.number}
-                                        onChange={e => {
-                                            const digits = e.target.value.replace(/\D/g, '').substring(0, 16);
-                                            const formatted = digits.replace(/(\d{4})(?=\d)/g, '$1 ');
-                                            setCheckoutCardInfo({...checkoutCardInfo, number: formatted});
-                                        }}
-                                        placeholder="0000 0000 0000 0000"
-                                        className="w-full bg-slate-800 border-none rounded-lg px-4 py-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 font-mono tracking-widest"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Nome Impresso no Cartão</label>
-                                    <input
-                                        type="text"
-                                        maxLength="50"
-                                        value={checkoutCardInfo.name}
-                                        onChange={e => setCheckoutCardInfo({...checkoutCardInfo, name: e.target.value})}
-                                        placeholder="NOME COMPLETO"
-                                        className="w-full bg-slate-800 border-none rounded-lg px-4 py-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 uppercase"
-                                    />
-                                </div>
+                                <input type="text" maxLength="19" value={checkoutCardInfo.number} onChange={e => setCheckoutCardInfo({...checkoutCardInfo, number: e.target.value.replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ')})} placeholder="0000 0000 0000 0000" className="w-full bg-slate-800 rounded-lg px-4 py-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 font-mono" />
+                                <input type="text" value={checkoutCardInfo.name} onChange={e => setCheckoutCardInfo({...checkoutCardInfo, name: e.target.value})} placeholder="NOME NO CARTÃO" className="w-full bg-slate-800 rounded-lg px-4 py-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 uppercase" />
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Validade</label>
-                                        <input
-                                            type="text"
-                                            maxLength="5"
-                                            value={checkoutCardInfo.exp}
-                                            onChange={e => {
-                                                let val = e.target.value.replace(/\D/g, '');
-                                                if (val.length > 2) val = val.substring(0, 2) + '/' + val.substring(2, 4);
-                                                setCheckoutCardInfo({...checkoutCardInfo, exp: val});
-                                            }}
-                                            placeholder="MM/AA"
-                                            className="w-full bg-slate-800 border-none rounded-lg px-4 py-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">CVV</label>
-                                        <input
-                                            type="text"
-                                            maxLength="4"
-                                            value={checkoutCardInfo.cvv}
-                                            onChange={e => setCheckoutCardInfo({...checkoutCardInfo, cvv: e.target.value.replace(/\D/g, '')})}
-                                            placeholder="123"
-                                            className="w-full bg-slate-800 border-none rounded-lg px-4 py-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 text-center font-mono"
-                                        />
-                                    </div>
+                                    <input type="text" maxLength="5" value={checkoutCardInfo.exp} onChange={e => setCheckoutCardInfo({...checkoutCardInfo, exp: e.target.value.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2')})} placeholder="MM/AA" className="w-full bg-slate-800 rounded-lg px-4 py-3 text-sm text-white text-center font-mono" />
+                                    <input type="text" maxLength="4" value={checkoutCardInfo.cvv} onChange={e => setCheckoutCardInfo({...checkoutCardInfo, cvv: e.target.value.replace(/\D/g, '')})} placeholder="CVV" className="w-full bg-slate-800 rounded-lg px-4 py-3 text-sm text-white text-center font-mono" />
                                 </div>
                             </div>
                         </div>
-
                         <div className="flex gap-3 mt-8">
-                            <button onClick={() => setCheckoutPlan(null)} disabled={checkingOut} className="flex-1 py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold transition-colors disabled:opacity-50">
-                                Cancelar
-                            </button>
-                            <button onClick={handleCheckout} disabled={checkingOut} className="flex-1 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
-                                {checkingOut && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                                {checkingOut ? 'Processando...' : 'Assinar Agora'}
+                            <button onClick={() => setCheckoutPlan(null)} disabled={checkingOut} className="flex-1 py-3.5 rounded-xl bg-slate-700 text-slate-200 text-sm font-semibold">Cancelar</button>
+                            <button onClick={handleCheckout} disabled={checkingOut} className="flex-1 py-3.5 rounded-xl bg-emerald-600 text-white text-sm font-bold flex items-center justify-center gap-2">
+                                {checkingOut ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Assinar Agora'}
                             </button>
                         </div>
                     </div>

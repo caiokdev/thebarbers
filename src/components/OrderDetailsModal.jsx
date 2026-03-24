@@ -20,8 +20,8 @@ export default function OrderDetailsModal({ order, clientMap, proMap, onClose, o
     if (!order) return null;
 
     const dt = new Date(order.scheduled_at || order.created_at || new Date());
-    const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
-    const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    const timeStr = new Date(order.scheduled_at || order.created_at).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+    const dateStr = new Date(order.scheduled_at || order.created_at).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' });
     const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.scheduled;
     const statusLabel = order.status === 'open' ? 'Comanda Aberta' : statusCfg.label;
 

@@ -94,24 +94,36 @@ const THEME_COLORS = {
     },
 };
 
-const ThemeContext = createContext(null);
+const ThemeContext = createContext({
+    theme: THEME_COLORS.rose,
+    themeColor: 'rose',
+    updateThemeColor: () => { },
+    THEME_COLORS,
+});
 
 export function ThemeProvider({ children }) {
     const [themeColor, setThemeColor] = useState('rose'); // Default: The Barbers brand red
 
     useEffect(() => {
+        let mounted = true;
         async function loadTheme() {
             try {
-                const { data: shop } = await supabase
+                const { data: shop, error } = await supabase
                     .from('barbershops')
                     .select('id, theme_color')
                     .limit(1)
                     .single();
-                if (shop?.theme_color && THEME_COLORS[shop.theme_color]) {
+                
+                if (error) {
+                    if (error.code !== 'PGRST116') console.error('Error loading theme:', error);
+                    return;
+                }
+
+                if (mounted && shop?.theme_color && THEME_COLORS[shop.theme_color]) {
                     setThemeColor(shop.theme_color);
                 }
-            } catch (_) {
-                // theme_color column may not exist yet — fallback to rose
+            } catch (err) {
+                console.error('Failed to load theme:', err);
             }
         }
         loadTheme();
@@ -120,13 +132,16 @@ export function ThemeProvider({ children }) {
         const channel = supabase
             .channel('theme-color-changes')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'barbershops' }, (payload) => {
-                if (payload.new?.theme_color && THEME_COLORS[payload.new.theme_color]) {
+                if (mounted && payload.new?.theme_color && THEME_COLORS[payload.new.theme_color]) {
                     setThemeColor(payload.new.theme_color);
                 }
             })
             .subscribe();
 
-        return () => { supabase.removeChannel(channel); };
+        return () => { 
+            mounted = false;
+            supabase.removeChannel(channel); 
+        };
     }, []);
 
     const theme = THEME_COLORS[themeColor] || THEME_COLORS.rose;
@@ -135,12 +150,13 @@ export function ThemeProvider({ children }) {
         if (!THEME_COLORS[color]) return;
         setThemeColor(color);
         try {
-            await supabase
+            const { error } = await supabase
                 .from('barbershops')
                 .update({ theme_color: color })
                 .eq('id', barbershopId);
-        } catch (_) {
-            // silently handled
+            if (error) throw error;
+        } catch (err) {
+            console.error('Failed to update theme color:', err);
         }
     };
 
@@ -154,6 +170,7 @@ export function ThemeProvider({ children }) {
 export function useTheme() {
     const ctx = useContext(ThemeContext);
     if (!ctx) {
+        console.warn('useTheme must be used within a ThemeProvider. Falling back to default theme.');
         return {
             theme: THEME_COLORS.rose,
             themeColor: 'rose',

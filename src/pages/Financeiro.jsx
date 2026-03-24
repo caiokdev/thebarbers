@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate, formatTime, formatDateTime, getLocalDateISO } from '../utils/dateUtils';
+import { formatCurrency, getStatusLabel } from '../utils/orderUtils';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 /* ═══════════════════════════════════════════════════════════════
    Financeiro — Visão de Águia
@@ -13,24 +15,23 @@ import autoTable from 'jspdf-autotable';
 
 const getMasterPassword = () => localStorage.getItem('admin_password') || 'admin123';
 
-const _fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 function formatBRL(v) {
-    return _fmtBRL.format(Number(v) || 0);
+    return formatCurrency(v);
 }
 
-function formatDate(iso) {
+function _formatDate(iso) {
     if (!iso) return '—';
-    const d = new Date(iso);
-    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return formatDate(iso).substring(0, 5); // DD/MM
 }
 
-function formatTime(iso) {
-    if (!iso) return '—';
-    const d = new Date(iso);
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+function _formatTime(iso) {
+    return formatTime(iso);
 }
 
 export default function Financeiro() {
+    const { adminProfile, professionals, clients, loading: globalLoading } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
+
     // ── Commission vault ──
     const [isCommissionUnlocked, setIsCommissionUnlocked] = useState(false);
     const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
@@ -38,7 +39,6 @@ export default function Financeiro() {
     const [isPasswordError, setIsPasswordError] = useState(false);
 
     // ── Core state ──
-    const [barbershopId, setBarbershopId] = useState(null);
     const [loading, setLoading] = useState(true);
 
     // ── Caixa do Dia ──
@@ -110,20 +110,6 @@ export default function Financeiro() {
     const endOfMonthISO = new Date(selYear, selMonthNum, 0, 23, 59, 59, 999).toISOString();
     const selectedMonthLabel = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][selMonthNum - 1];
     const isCurrentMonth = selYear === today.getFullYear() && selMonthNum === (today.getMonth() + 1);
-
-    // ── Fetch barbershop_id ──
-    useEffect(() => {
-        async function fetchShop() {
-            const { data: shop } = await supabase
-                .from('barbershops')
-                .select('id')
-                .limit(1)
-                .single();
-            if (shop) setBarbershopId(shop.id);
-            else setLoading(false);
-        }
-        fetchShop();
-    }, []);
 
     // ── Master fetch ──
     const fetchAll = useCallback(async () => {
@@ -494,7 +480,7 @@ export default function Financeiro() {
             return {
                 'Cliente': item.cliente,
                 'Profissional': item.profissional,
-                'Data Fechamento': `${formatDate(item.fechamento)} ${formatTime(item.fechamento)}`,
+                'Data Fechamento': `${_formatDate(item.fechamento)} ${_formatTime(item.fechamento)}`,
                 'Método Pagamento': payLabels[item.pagamento] || item.pagamento,
                 'Itens da Comanda': itemsList || 'Sem itens detalhados',
                 'Valor Final (R$)': item.valor.toFixed(2).replace('.', ',')
@@ -532,7 +518,7 @@ export default function Financeiro() {
             const rowData = [
                 item.cliente,
                 item.profissional,
-                `${formatDate(item.fechamento)} ${formatTime(item.fechamento)}`,
+                `${_formatDate(item.fechamento)} ${_formatTime(item.fechamento)}`,
                 payLabels[item.pagamento] || item.pagamento,
                 itemsList || '-',
                 formatBRL(item.valor)
@@ -561,7 +547,7 @@ export default function Financeiro() {
             const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatBRL(it.price)})`).join(' | ');
             return {
                 'Cliente/Pedido': item.cliente || item.id.split('-')[0],
-                'Data Fechamento': `${formatDate(item.closed_at)} ${formatTime(item.closed_at)}`,
+                'Data Fechamento': `${_formatDate(item.closed_at)} ${_formatTime(item.closed_at)}`,
                 'Método Pagamento': payLabels[item.payment_method] || item.payment_method || '—',
                 'Itens da Comanda': itemsList || 'Sem itens',
                 'Valor Produzido': parseFloat(item.total_amount || 0).toFixed(2).replace('.', ','),
@@ -590,7 +576,7 @@ export default function Financeiro() {
             const prodVal = parseFloat(item.total_amount || 0);
             const comVal = prodVal * (b.rate / 100);
             return [
-                `${formatDate(item.closed_at)} ${formatTime(item.closed_at)}`,
+                `${_formatDate(item.closed_at)} ${_formatTime(item.closed_at)}`,
                 item.cliente || item.id.split('-')[0],
                 payLabels[item.payment_method] || item.payment_method || '—',
                 itemsList || '-',
@@ -617,10 +603,8 @@ export default function Financeiro() {
     };
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
-                {/* ── Header ── */}
+        <>
+            {/* ── Header ── */}
                 <div className="flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm flex-shrink-0">
                     <div className="flex items-center gap-4">
                         <div>
@@ -788,7 +772,7 @@ export default function Financeiro() {
                                                         </div>
                                                         <div className="min-w-0">
                                                             <p className="text-sm text-slate-200 truncate">{s.description}</p>
-                                                            <p className="text-[11px] text-slate-600">{formatTime(s.created_at)}</p>
+                                                            <p className="text-[11px] text-slate-600">{_formatTime(s.created_at)}</p>
                                                         </div>
                                                     </div>
                                                     <p className="text-sm font-semibold text-rose-400 ml-3 flex-shrink-0">- {formatBRL(s.amount)}</p>
@@ -932,8 +916,8 @@ export default function Financeiro() {
                                                                                             <tr key={order.id} className="hover:bg-slate-800/80 transition-colors">
                                                                                                 <td className="px-3 py-2.5 whitespace-nowrap">
                                                                                                     <div className="flex flex-col">
-                                                                                                        <span className="font-medium text-slate-200">{formatDate(order.closed_at)}</span>
-                                                                                                        <span className="text-[10px] text-slate-500">{formatTime(order.closed_at)}</span>
+                                                                                                        <span className="font-medium text-slate-200">{_formatDate(order.closed_at)}</span>
+                                                                                                        <span className="text-[10px] text-slate-500">{_formatTime(order.closed_at)}</span>
                                                                                                     </div>
                                                                                                 </td>
                                                                                                 <td className="px-3 py-2.5 font-medium">{order.cliente || order.id.split('-')[0]}</td>
@@ -1058,12 +1042,12 @@ export default function Financeiro() {
                                                                     <p className="text-slate-400">{h.profissional}</p>
                                                                 </td>
                                                                 <td className="py-3 pr-4">
-                                                                    <span className="text-slate-500">{formatDate(h.abertura)}</span>
-                                                                    <span className="text-slate-600 ml-1">{formatTime(h.abertura)}</span>
+                                                                    <span className="text-slate-500">{_formatDate(h.abertura)}</span>
+                                                                    <span className="text-slate-600 ml-1">{_formatTime(h.abertura)}</span>
                                                                 </td>
                                                                 <td className="py-3 pr-4">
-                                                                    <span className="text-slate-500">{formatDate(h.fechamento)}</span>
-                                                                    <span className="text-slate-600 ml-1">{formatTime(h.fechamento)}</span>
+                                                                    <span className="text-slate-500">{_formatDate(h.fechamento)}</span>
+                                                                    <span className="text-slate-600 ml-1">{_formatTime(h.fechamento)}</span>
                                                                 </td>
                                                                 <td className="py-3 pr-4">
                                                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg bg-slate-700/50 text-xs text-slate-400">
@@ -1277,7 +1261,7 @@ export default function Financeiro() {
                                                         </svg>
                                                         <div className="min-w-0">
                                                             <p className="text-sm text-slate-200 font-medium truncate">{item.cliente}</p>
-                                                            <p className="text-[11px] text-slate-600">{formatDate(item.data)} {formatTime(item.data)}</p>
+                                                            <p className="text-[11px] text-slate-600">{_formatDate(item.data)} {_formatTime(item.data)}</p>
                                                         </div>
                                                     </div>
                                                     <p className="text-sm font-bold text-red-500 ml-3 flex-shrink-0">{formatBRL(item.valor)}</p>
@@ -1343,7 +1327,6 @@ export default function Financeiro() {
                         </div>
                     )
                 }
-            </main>
-        </div>
+        </>
     );
 }

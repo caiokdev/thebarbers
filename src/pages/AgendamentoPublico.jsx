@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
+import { formatDate, formatTime } from '../utils/dateUtils';
+import { formatCurrency } from '../utils/orderUtils';
 
 /* ═══════════════════════════════════════════════════════════════
    AGENDAMENTO PÚBLICO — Interface Mobile-First para o cliente
    ═══════════════════════════════════════════════════════════════ */
 
-const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatBRL = (v) => formatCurrency(v);
 
 const THEME_HEX = {
     emerald: { primary: '#10b981', light: '#d1fae5', dark: '#065f46', bg: '#ecfdf5', ring: 'rgba(16,185,129,0.3)' },
@@ -175,7 +177,9 @@ export default function AgendamentoPublico() {
             // [slotStart, slotStart + totalDuration) overlaps with [busyStart, busyStart + 30min)
             const isBusy = busySlots.some(bs => {
                 const bsDate = new Date(bs.scheduled_at);
-                const bsMinutes = bsDate.getHours() * 60 + bsDate.getMinutes();
+                const bsTimeStr = bsDate.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                const [h, min] = bsTimeStr.split(':').map(Number);
+                const bsMinutes = h * 60 + min;
                 const bsDuration = 30; // assume each existing appointment occupies at least 30 min
                 // Overlap: slotStart < busyEnd AND busyStart < slotEnd
                 return m < (bsMinutes + bsDuration) && bsMinutes < (m + totalDuration);
@@ -380,7 +384,7 @@ export default function AgendamentoPublico() {
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-500">Data</span>
                                 <span className="font-medium text-slate-800">
-                                    {selectedDate && `${String(selectedDate.date.getDate()).padStart(2, '0')}/${String(selectedDate.date.getMonth() + 1).padStart(2, '0')}/${selectedDate.date.getFullYear()}`}
+                                    {selectedDate && formatDate(selectedDate.date)}
                                 </span>
                             </div>
                             <div className="flex justify-between text-sm">
@@ -668,7 +672,7 @@ export default function AgendamentoPublico() {
                                 <div className="flex justify-between text-sm">
                                     <span className="text-slate-500">Data</span>
                                     <span className="font-medium text-slate-800">
-                                        {selectedDate && `${String(selectedDate.date.getDate()).padStart(2, '0')}/${String(selectedDate.date.getMonth() + 1).padStart(2, '0')}/${selectedDate.date.getFullYear()}`}
+                                        {selectedDate && formatDate(selectedDate.date)}
                                     </span>
                                 </div>
                                 <div className="flex justify-between text-sm">

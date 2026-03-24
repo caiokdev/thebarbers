@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
+import { isValidUUID } from '../utils/orderUtils';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 /* ═══════════════════════════════════════════════════════════════
    PDV — Fechamento de Comanda
@@ -10,6 +11,8 @@ import Sidebar from '../components/Sidebar';
 export default function PDV() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { adminProfile, loading: globalLoading, refreshData } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
 
     // ── Core state ──
     const [order, setOrder] = useState(null);
@@ -29,14 +32,28 @@ export default function PDV() {
 
     // ── Fetch order ──
     useEffect(() => {
+        if (!id || !isValidUUID(id)) {
+            if (id) toast.error('Comanda inválida.');
+            navigate('/dashboard');
+            return;
+        }
+
         async function fetchOrder() {
+            setLoading(true);
             const { data, error } = await supabase
                 .from('orders')
                 .select('*, order_items(*)')
                 .eq('id', id)
                 .single();
 
-            if (!error && data) {
+            if (error) {
+                console.error('Error fetching order:', error);
+                toast.error('Erro ao buscar comanda.');
+                navigate('/dashboard');
+                return;
+            }
+
+            if (data) {
                 setOrder(data);
                 // Populate cart from existing order_items
                 const existing = (data.order_items || []).map((item, i) => ({
@@ -51,8 +68,8 @@ export default function PDV() {
             }
             setLoading(false);
         }
-        if (id) fetchOrder();
-    }, [id]);
+        fetchOrder();
+    }, [id, navigate]);
 
     // ── Fetch catalog (services + products) ──
     useEffect(() => {
@@ -247,9 +264,7 @@ export default function PDV() {
     }
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
+        <main className="flex-1 flex flex-col h-full overflow-hidden">
                 {/* ── Header ── */}
                 <div className="flex items-center justify-between px-8 py-5 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm">
                     <div className="flex items-center gap-4">
@@ -523,6 +538,5 @@ export default function PDV() {
                     )}
                 </div>
             </main>
-        </div>
     );
 }

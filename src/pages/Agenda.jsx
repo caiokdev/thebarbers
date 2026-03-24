@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
+import { formatDate, formatTime, getLocalDateISO } from '../utils/dateUtils';
+import { formatCurrency } from '../utils/orderUtils';
 
 /* ───────── Constants ───────── */
 const DAY_NAMES = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -17,11 +18,16 @@ const AVATAR_COLORS = [
 
 /* ───────── Helpers ───────── */
 function formatDateFull(d) {
-    return `${DAY_NAMES[d.getDay()]}, ${d.getDate()} de ${MONTH_NAMES[d.getMonth()]}`;
+    return d.toLocaleDateString('pt-BR', { 
+        timeZone: 'America/Sao_Paulo', 
+        weekday: 'long', 
+        day: 'numeric', 
+        month: 'long' 
+    });
 }
 
 function formatDateInput(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return getLocalDateISO(d);
 }
 
 function getInitials(name) {
@@ -42,10 +48,6 @@ function generateTimeSlots(startHour, endHour, startMin = 0, endMin = 0) {
         if (h === endHour && minEnd >= 30) slots.push(`${String(h).padStart(2, '0')}:30`);
     }
     return slots;
-}
-
-function formatCurrency(v) {
-    return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',');
 }
 
 const STATUS_CONFIG = {
@@ -136,7 +138,7 @@ export default function Agenda() {
                 setProfessionals(barbersRes.data || []);
                 setClients(clientsRes.data || []);
 
-                // Build a combined catalog: products become type='product'
+                // Build a combined catalog
                 const productItems = (productsRes.data || []).map(p => ({
                     id: p.id,
                     name: p.name,
@@ -145,7 +147,6 @@ export default function Agenda() {
                     current_stock: p.current_stock ?? 0,
                 }));
 
-                // Try fetching services catalog (may not exist as a table)
                 let serviceItems = [];
                 try {
                     const { data: svcData } = await supabase
@@ -159,13 +160,10 @@ export default function Agenda() {
                         price: parseFloat(s.price || 0),
                         type: 'service',
                     }));
-                } catch (_) {
-                    // services table may not exist
-                }
+                } catch (_) {}
 
                 setCatalog([...serviceItems, ...productItems]);
 
-                // Business hours
                 try {
                     const { data: bhData } = await supabase
                         .from('business_hours')
@@ -173,23 +171,16 @@ export default function Agenda() {
                         .eq('barbershop_id', shop.id)
                         .order('day_of_week');
                     setBusinessHours(bhData || []);
-                } catch (_) {
-                    // business_hours table may not exist yet
-                }
-            } catch (_) {
-                // silently handled
-            } finally {
+                } catch (_) {}
+            } catch (_) {} finally {
                 setLoading(false);
             }
         }
         fetchData();
     }, []);
 
-    // ── Fetch day appointments ──
     const fetchAppointments = useCallback(async () => {
         if (!barbershopId) return;
-        // Build LOCAL midnight → 23:59 as proper UTC ISO strings so Supabase
-        // compares against the correct wall-clock day in this timezone.
         const y = selectedDate.getFullYear();
         const mo = selectedDate.getMonth();
         const d = selectedDate.getDate();
@@ -211,13 +202,11 @@ export default function Agenda() {
         if (barbershopId) fetchAppointments();
     }, [barbershopId, selectedDate, fetchAppointments]);
 
-    // ── Current time ticker ──
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 60000);
         return () => clearInterval(timer);
     }, []);
 
-    // ── Date navigation ──
     const goToday = () => setSelectedDate(new Date());
     const goPrev = () => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d); };
     const goNext = () => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d); };
@@ -236,17 +225,12 @@ export default function Agenda() {
         return HEADER_HEIGHT + ((h - dynamicStartHour) * 60 + m) / 30 * ROW_HEIGHT;
     }, [currentTime, dayConfig, dynamicStartHour, dynamicEndHour]);
 
-    // ── Appointment placement helpers ──
-
-
-    // Client lookup
     const clientMap = useMemo(() => {
         const m = {};
         clients.forEach(c => { m[c.id] = c.name; });
         return m;
     }, [clients]);
 
-    // Subscriber status lookup: { [client_id]: 'active' | 'overdue' | null }
     const subscriberMap = useMemo(() => {
         const m = {};
         clients.forEach(c => {
@@ -255,7 +239,6 @@ export default function Agenda() {
         return m;
     }, [clients]);
 
-    // Professional lookup
     const proMap = useMemo(() => {
         const m = {};
         professionals.forEach(p => { m[p.id] = p.name; });
@@ -264,7 +247,6 @@ export default function Agenda() {
 
     const appointmentsBySlot = useMemo(() => {
         const map = {};
-        // Sort chronologically. If same time, no_show goes to bottom.
         [...(appointments || [])].sort((a, b) => {
             const timeA = new Date(a.scheduled_at).getTime();
             const timeB = new Date(b.scheduled_at).getTime();
@@ -275,17 +257,15 @@ export default function Agenda() {
         }).forEach(a => {
             if (!a.scheduled_at || !a.professional_id) return;
 
-            // Apply search filter if active
             if (searchQuery.trim() !== '') {
                 const clientName = clientMap[a.client_id] || '';
-                if (!clientName.toLowerCase().includes(searchQuery.toLowerCase())) {
-                    return; // Skip this appointment if it doesn't match the search
-                }
+                if (!clientName.toLowerCase().includes(searchQuery.toLowerCase())) return;
             }
 
             const dt = new Date(a.scheduled_at);
-            const hh = String(dt.getHours()).padStart(2, '0');
-            const mm = dt.getMinutes() < 30 ? '00' : '30';
+            const timeStr = dt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+            const [hh, mmRaw] = timeStr.split(':');
+            const mm = parseInt(mmRaw) < 30 ? '00' : '30';
             const key = `${hh}:${mm}-${a.professional_id}`;
             if (!map[key]) map[key] = [];
             map[key].push(a);
@@ -293,12 +273,10 @@ export default function Agenda() {
         return map;
     }, [appointments, searchQuery, clientMap]);
 
-    // ── Modal handlers ──
     const openModalEmpty = () => { setSelectedSlot({ professionalId: '', time: '' }); setIsModalOpen(true); };
     const openModalFromCell = (professionalId, time) => { setSelectedSlot({ professionalId, time }); setIsModalOpen(true); };
     const openDetailsModal = (order) => { setSelectedOrderDetails(order); setIsDetailsModalOpen(true); };
 
-    // ── Subscription Refund Helper ──
     const refundOrderServices = async (orderId, clientId) => {
         const client = clients.find(c => c.id === clientId);
         if (!client || !client.is_subscriber) return;
@@ -322,47 +300,11 @@ export default function Agenda() {
     };
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
-
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
-                {/* ─── HEADER ─── */}
-                <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center justify-between px-8 flex-shrink-0">
-                    <div className="flex items-center gap-4">
-                        <h1 className="text-lg font-semibold text-slate-100">Agenda</h1>
-                        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-slate-700 text-slate-300 text-sm font-semibold rounded-full">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            Gerenciamento de horários
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        {/* Search */}
-                        <div className="hidden md:flex items-center gap-2 bg-slate-700/50 rounded-xl px-4 py-2 text-sm text-slate-400 border border-slate-600 focus-within:border-red-600 focus-within:ring-1 focus-within:ring-red-600/30 transition-all">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            <input
-                                type="text"
-                                placeholder="Buscar por cliente..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="bg-transparent border-none outline-none text-slate-200 placeholder-slate-400 w-full md:w-56"
-                            />
-                        </div>
-                        <button className="relative p-2 text-slate-400 hover:text-slate-200 transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                            </svg>
-                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-600 rounded-full"></span>
-                        </button>
-                    </div>
-                </header>
-
+        <div className="h-full flex flex-col overflow-hidden -m-8">
+            <div className="flex flex-col flex-1 overflow-hidden">
                 {/* ─── DATE TOOLBAR ─── */}
-                <div className="flex items-center justify-between px-8 py-4 bg-slate-800/50 border-b border-slate-700/50">
-                    <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between px-8 py-4 bg-slate-800/50 border-b border-slate-700/50 flex-shrink-0">
+                    <div className="flex items-center gap-6">
                         <div className="flex items-center gap-1">
                             <button onClick={goPrev} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors" title="Dia anterior">
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
@@ -372,8 +314,20 @@ export default function Agenda() {
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                             </button>
                         </div>
-                        <h2 className="text-base font-semibold text-slate-100 ml-2">{formatDateFull(selectedDate)}</h2>
+                        <h2 className="text-base font-semibold text-slate-100 min-w-[200px]">{formatDateFull(selectedDate)}</h2>
+
+                        <div className="hidden md:flex items-center gap-2 bg-slate-900/50 rounded-xl px-4 py-2 text-sm text-slate-400 border border-slate-700 focus-within:border-red-600 transition-all">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <input
+                                type="text"
+                                placeholder="Buscar cliente..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="bg-transparent border-none outline-none text-slate-200 placeholder-slate-500 w-48"
+                            />
+                        </div>
                     </div>
+
                     <button onClick={openModalEmpty} className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-red-600/20">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
                         Novo Agendamento
@@ -397,9 +351,7 @@ export default function Agenda() {
                         <div className="flex items-center justify-center h-full">
                             <div className="text-center">
                                 <div className="w-20 h-20 bg-rose-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                    <svg className="w-10 h-10 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                                    </svg>
+                                    <svg className="w-10 h-10 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
                                 </div>
                                 <h3 className="text-lg font-semibold text-slate-200 mb-1">Estabelecimento Fechado</h3>
                                 <p className="text-sm text-slate-500">Não há horários disponíveis para {DAY_NAMES[selectedDate.getDay()]}.</p>
@@ -409,7 +361,6 @@ export default function Agenda() {
                     ) : (
                         <div className="min-w-max relative">
                             <div className="grid" style={{ gridTemplateColumns: `72px repeat(${professionals.length}, minmax(180px, 1fr))` }}>
-                                {/* Header row */}
                                 <div className="sticky top-0 z-20 bg-slate-900 border-b border-r border-slate-700 h-[72px]" />
                                 {professionals.map((pro, idx) => (
                                     <div key={pro.id} className="sticky top-0 z-20 bg-slate-900 border-b border-r border-slate-700/50 h-[72px] flex items-center justify-center gap-3 px-4">
@@ -421,7 +372,6 @@ export default function Agenda() {
                                     </div>
                                 ))}
 
-                                {/* Time rows */}
                                 {timeSlots.map((time) => {
                                     const isFullHour = time.endsWith(':00');
                                     return (
@@ -437,9 +387,7 @@ export default function Agenda() {
                                                 return (
                                                     <div
                                                         key={slotKey}
-                                                        onClick={(e) => {
-                                                            appts.length === 0 && openModalFromCell(pro.id, time);
-                                                        }}
+                                                        onClick={(e) => { appts.length === 0 && openModalFromCell(pro.id, time); }}
                                                         className={`min-h-[56px] border-r border-slate-700/30 relative transition-all duration-150 p-0.5 flex flex-col gap-1 ${isFullHour ? 'border-t border-slate-700/60' : 'border-t border-slate-700/20'} ${appts.length === 0 ? 'cursor-pointer group hover:bg-emerald-500/5 hover:border-red-600/20' : ''}`}
                                                     >
                                                         {appts.length > 0 ? (
@@ -456,24 +404,16 @@ export default function Agenda() {
                                                                     <div className="flex items-center justify-between gap-1">
                                                                         <p className={`text-[10px] truncate ${appt.status === 'no_show' ? 'text-slate-600 line-through' : 'text-slate-400'}`}>{formatCurrency(appt.total_amount)}</p>
                                                                         <div className="flex items-center gap-1 flex-shrink-0">
-                                                                            {appt.status === 'no_show' && (
-                                                                                <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>
-                                                                            )}
-                                                                            {appt.status !== 'no_show' && subscriberMap[appt.client_id] === 'overdue' && (
-                                                                                <span className="text-[8px] font-bold text-white bg-red-600 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">⚠ Atr</span>
-                                                                            )}
-                                                                            {appt.status !== 'no_show' && subscriberMap[appt.client_id] && subscriberMap[appt.client_id] !== 'overdue' && (
-                                                                                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none" style={{ background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' }}>★</span>
-                                                                            )}
+                                                                            {appt.status === 'no_show' && <span className="text-[8px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">Faltou</span>}
+                                                                            {appt.status !== 'no_show' && subscriberMap[appt.client_id] === 'overdue' && <span className="text-[8px] font-bold text-white bg-red-600 px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none">⚠ Atr</span>}
+                                                                            {appt.status !== 'no_show' && subscriberMap[appt.client_id] && subscriberMap[appt.client_id] !== 'overdue' && <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide leading-none" style={{ background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' }}>★</span>}
                                                                         </div>
                                                                     </div>
                                                                 </div>
                                                             ))
                                                         ) : (
                                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <div className="w-6 h-6 rounded-full bg-red-600/10 border border-red-600/20 flex items-center justify-center">
-                                                                    <svg className="w-3 h-3 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                                                                </div>
+                                                                <div className="w-6 h-6 rounded-full bg-red-600/10 border border-red-600/20 flex items-center justify-center text-red-600">+</div>
                                                             </div>
                                                         )}
                                                     </div>
@@ -484,7 +424,6 @@ export default function Agenda() {
                                 })}
                             </div>
 
-                            {/* Now Line */}
                             {isToday && nowLineTop !== null && (
                                 <div className="absolute left-[72px] right-0 z-30 pointer-events-none" style={{ top: `${nowLineTop}px` }}>
                                     <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-600 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
@@ -494,118 +433,64 @@ export default function Agenda() {
                         </div>
                     )}
                 </div>
-            </main>
+            </div>
 
-            {/* ═══════ CREATION MODAL ═══════ */}
             {isModalOpen && (
                 <AppointmentModal
-                    professionals={professionals}
-                    clients={clients}
-                    catalog={catalog}
-                    selectedDate={selectedDate}
-                    selectedSlot={selectedSlot}
-                    barbershopId={barbershopId}
-                    appointments={appointments}
-                    saving={saving}
-                    setSaving={setSaving}
+                    professionals={professionals} clients={clients} catalog={catalog}
+                    selectedDate={selectedDate} selectedSlot={selectedSlot}
+                    barbershopId={barbershopId} appointments={appointments}
+                    saving={saving} setSaving={setSaving}
                     onClose={() => setIsModalOpen(false)}
                     onSaved={() => { setIsModalOpen(false); fetchAppointments(); }}
                 />
             )}
 
-            {/* ═══════ DETAILS MODAL ═══════ */}
             {isDetailsModalOpen && selectedOrderDetails && (
                 <OrderDetailsModal
-                    order={selectedOrderDetails}
-                    clientMap={clientMap}
-                    proMap={proMap}
+                    order={selectedOrderDetails} clientMap={clientMap} proMap={proMap}
                     onClose={() => { setIsDetailsModalOpen(false); setSelectedOrderDetails(null); }}
                     onDelete={async () => {
-                        if (!['canceled', 'no_show'].includes(selectedOrderDetails.status)) {
-                            await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
-                        }
-                        
+                        if (!['canceled', 'no_show'].includes(selectedOrderDetails.status)) await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
                         if (selectedOrderDetails.status === 'no_show') {
                             const newNotes = selectedOrderDetails.notes ? selectedOrderDetails.notes + '\n[HIDDEN_FROM_AGENDA]' : '[HIDDEN_FROM_AGENDA]';
-                            const { error } = await supabase
-                                .from('orders')
-                                .update({ notes: newNotes })
-                                .eq('id', selectedOrderDetails.id);
+                            const { error } = await supabase.from('orders').update({ notes: newNotes }).eq('id', selectedOrderDetails.id);
                             if (error) { toast.error(`Erro ao ocultar: ${error.message}`); return; }
                             toast.success('Falta ocultada da agenda!');
                         } else {
-                            const { error } = await supabase
-                                .from('orders')
-                                .delete()
-                                .eq('id', selectedOrderDetails.id);
+                            const { error } = await supabase.from('orders').delete().eq('id', selectedOrderDetails.id);
                             if (error) { toast.error(`Erro ao excluir: ${error.message}`); return; }
                             toast.success('Agendamento excluído com sucesso.');
                         }
-                        
-                        setIsDetailsModalOpen(false);
-                        setSelectedOrderDetails(null);
-                        fetchAppointments();
+                        setIsDetailsModalOpen(false); setSelectedOrderDetails(null); fetchAppointments();
                     }}
                     onCancel={async () => {
                         await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
-                        const { error } = await supabase
-                            .from('orders')
-                            .update({ status: 'canceled' })
-                            .eq('id', selectedOrderDetails.id);
+                        const { error } = await supabase.from('orders').update({ status: 'canceled' }).eq('id', selectedOrderDetails.id);
                         if (error) { toast.error(`Erro ao cancelar: ${error.message}`); return; }
-                        setIsDetailsModalOpen(false);
-                        setSelectedOrderDetails(null);
-                        fetchAppointments();
+                        setIsDetailsModalOpen(false); setSelectedOrderDetails(null); fetchAppointments();
                         toast.success('Agendamento cancelado com sucesso.');
                     }}
                     onNoShow={async () => {
                         await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
-                        const { error } = await supabase
-                            .from('orders')
-                            .update({ status: 'no_show' })
-                            .eq('id', selectedOrderDetails.id);
+                        const { error } = await supabase.from('orders').update({ status: 'no_show' }).eq('id', selectedOrderDetails.id);
                         if (error) { toast.error(`Erro ao marcar falta: ${error.message}`); return; }
-
                         try {
-                            // Buscar estado real-time para evitar bloqueios de state stale
-                            const { data: shop } = await supabase
-                                .from('barbershops')
-                                .select('noshow_active')
-                                .eq('id', barbershopId)
-                                .single();
-
-                            if (shop && shop.noshow_active) {
-                                // Envia POST como JSON para o webhook ser lido corretamente pelo n8n
+                            const { data: shop } = await supabase.from('barbershops').select('noshow_active').eq('id', barbershopId).single();
+                            if (shop?.noshow_active) {
                                 await fetch('https://caiokdev.app.n8n.cloud/webhook-test/naocompareceu', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        orderId: selectedOrderDetails.id,
-                                        barbershopId: barbershopId,
-                                        clientId: selectedOrderDetails.client_id,
-                                        professionalId: selectedOrderDetails.professional_id,
-                                        scheduledAt: selectedOrderDetails.scheduled_at,
-                                    })
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ orderId: selectedOrderDetails.id, barbershopId, clientId: selectedOrderDetails.client_id, professionalId: selectedOrderDetails.professional_id, scheduledAt: selectedOrderDetails.scheduled_at })
                                 });
                             }
-                        } catch (err) {
-                            console.error('Erro ao acionar webhook n8n (no_show):', err);
-                        }
-
-                        setIsDetailsModalOpen(false);
-                        setSelectedOrderDetails(null);
-                        fetchAppointments();
+                        } catch (err) { console.error('Erro ao acionar webhook n8n (no_show):', err); }
+                        setIsDetailsModalOpen(false); setSelectedOrderDetails(null); fetchAppointments();
                         toast.success('Cliente marcado como Não Compareceu.');
                     }}
                     onOpenComanda={async () => {
-                        const { error } = await supabase
-                            .from('orders')
-                            .update({ status: 'open' })
-                            .eq('id', selectedOrderDetails.id);
+                        const { error } = await supabase.from('orders').update({ status: 'open' }).eq('id', selectedOrderDetails.id);
                         if (error) { toast.error(`Erro ao abrir comanda: ${error.message}`); return; }
-                        setIsDetailsModalOpen(false);
-                        setSelectedOrderDetails(null);
-                        fetchAppointments();
+                        setIsDetailsModalOpen(false); setSelectedOrderDetails(null); fetchAppointments();
                         navigate(`/pdv/${selectedOrderDetails.id}`);
                     }}
                 />
@@ -630,50 +515,35 @@ function AppointmentModal({
     const [cartItems, setCartItems] = useState([]);
     const [catalogSelect, setCatalogSelect] = useState('');
 
-    // Avulso mode
     const [isAvulso, setIsAvulso] = useState(false);
     const [avulsoValue, setAvulsoValue] = useState('');
     const [avulsoNotes, setAvulsoNotes] = useState('');
     const [origin, setOrigin] = useState('reception');
 
-    // Subscriber plan for selected client
     const [clientSub, setClientSub] = useState(null);
     const [subLoading, setSubLoading] = useState(false);
 
-    // Client search
     const filteredClients = useMemo(() => {
         if (!clientSearch.trim()) return clients.slice(0, 8);
         const q = clientSearch.toLowerCase();
         return clients.filter(c => c.name?.toLowerCase().includes(q)).slice(0, 8);
     }, [clientSearch, clients]);
 
-    // Fetch subscription when client changes
     useEffect(() => {
         if (!clientId) { setClientSub(null); return; }
         const clientObj = clients.find(c => c.id === clientId);
         if (!clientObj?.is_subscriber) { setClientSub(null); return; }
         setSubLoading(true);
-        supabase
-            .from('client_subscriptions')
-            .select('*, plans(name, haircut_limit, shave_limit)')
-            .eq('client_id', clientId)
-            .single()
+        supabase.from('client_subscriptions').select('*, plans(name, haircut_limit, shave_limit)').eq('client_id', clientId).single()
             .then(async ({ data }) => {
                 if (data && !data.plans && data.plan_id) {
-                    // plans join failed — fallback: fetch plan directly
-                    const { data: planData } = await supabase
-                        .from('plans')
-                        .select('name, haircut_limit, shave_limit')
-                        .eq('id', data.plan_id)
-                        .single();
+                    const { data: planData } = await supabase.from('plans').select('name, haircut_limit, shave_limit').eq('id', data.plan_id).single();
                     if (planData) data.plans = planData;
                 }
-                setClientSub(data || null);
-                setSubLoading(false);
+                setClientSub(data || null); setSubLoading(false);
             });
     }, [clientId, clients]);
 
-    // Total
     const totalAmount = useMemo(() => {
         if (isAvulso) return parseFloat(avulsoValue) || 0;
         return cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -684,62 +554,27 @@ function AppointmentModal({
         const item = catalog.find(c => c.id === catalogId);
         if (!item) return;
 
-        // Stock validation for products
         if (item.type === 'product') {
-            if ((item.current_stock ?? 0) <= 0) {
-                toast.error('Produto esgotado! Não é possível adicionar.');
-                setCatalogSelect('');
-                return;
-            }
-            const existingInCart = cartItems.find(ci => ci.id === item.id);
-            const currentQtyInCart = existingInCart ? existingInCart.quantity : 0;
-            if (currentQtyInCart + 1 > item.current_stock) {
-                toast.error(`Estoque insuficiente. Apenas ${item.current_stock} unidades disponíveis de "${item.name}".`);
-                setCatalogSelect('');
-                return;
-            }
+            if ((item.current_stock ?? 0) <= 0) { toast.error('Produto esgotado!'); setCatalogSelect(''); return; }
+            const existing = cartItems.find(ci => ci.id === item.id);
+            if ((existing?.quantity || 0) + 1 > item.current_stock) { toast.error(`Estoque insuficiente (${item.current_stock} disponíveis).`); setCatalogSelect(''); return; }
         }
 
-        // ── Plan restriction for services ──
         if (item.type === 'service' && clientSub) {
             const n = (item.name || '').toLowerCase();
             const isHaircut = n.includes('corte') || n.includes('cabelo');
-            const isShave   = n.includes('barba');
-
+            const isShave = n.includes('barba');
             if (isHaircut) {
                 const limit = clientSub.plans?.haircut_limit ?? 999;
-                if (limit === 0) {
-                    toast.error(`❌ Corte não incluso no "${clientSub.plans?.name || 'plano'}" deste cliente.`);
-                    setCatalogSelect('');
-                    return;
-                }
-                const usedInCart = cartItems.filter(ci => {
-                    const cn = (ci.name || '').toLowerCase();
-                    return ci.type === 'service' && (cn.includes('corte') || cn.includes('cabelo'));
-                }).reduce((s, ci) => s + ci.quantity, 0);
-                if ((clientSub.haircuts_used || 0) + usedInCart >= limit) {
-                    toast.error(`❌ Limite de cortes do plano atingido (${clientSub.haircuts_used}/${limit} já usados).`);
-                    setCatalogSelect('');
-                    return;
-                }
+                if (limit === 0) { toast.error(`❌ Corte não incluso.`); setCatalogSelect(''); return; }
+                const used = cartItems.filter(ci => ci.type === 'service' && (ci.name.toLowerCase().includes('corte') || ci.name.toLowerCase().includes('cabelo'))).reduce((s, ci) => s + ci.quantity, 0);
+                if ((clientSub.haircuts_used || 0) + used >= limit) { toast.error(`❌ Limite de cortes atingido.`); setCatalogSelect(''); return; }
             }
-
             if (isShave) {
                 const limit = clientSub.plans?.shave_limit ?? 999;
-                if (limit === 0) {
-                    toast.error(`❌ Barba não inclusa no "${clientSub.plans?.name || 'plano'}" deste cliente.`);
-                    setCatalogSelect('');
-                    return;
-                }
-                const usedInCart = cartItems.filter(ci => {
-                    const cn = (ci.name || '').toLowerCase();
-                    return ci.type === 'service' && cn.includes('barba');
-                }).reduce((s, ci) => s + ci.quantity, 0);
-                if ((clientSub.shaves_used || 0) + usedInCart >= limit) {
-                    toast.error(`❌ Limite de barbas do plano atingido (${clientSub.shaves_used}/${limit} já usados).`);
-                    setCatalogSelect('');
-                    return;
-                }
+                if (limit === 0) { toast.error(`❌ Barba não inclusa.`); setCatalogSelect(''); return; }
+                const used = cartItems.filter(ci => ci.type === 'service' && ci.name.toLowerCase().includes('barba')).reduce((s, ci) => s + ci.quantity, 0);
+                if ((clientSub.shaves_used || 0) + used >= limit) { toast.error(`❌ Limite de barbas atingido.`); setCatalogSelect(''); return; }
             }
         }
 
@@ -752,399 +587,155 @@ function AppointmentModal({
     };
 
     const updateQty = (id, delta) => {
-        setCartItems(prev =>
-            prev.map(ci => {
-                if (ci.id !== id) return ci;
-                const newQty = ci.quantity + delta;
-                if (newQty <= 0) return { ...ci, quantity: 0 };
-
-                // Stock validation for product increment
-                if (delta > 0 && ci.type === 'product') {
-                    const catItem = catalog.find(c => c.id === ci.id);
-                    if (catItem && newQty > (catItem.current_stock ?? 0)) {
-                        toast.error(`Estoque insuficiente. Apenas ${catItem.current_stock} unidades disponíveis de "${ci.name}".`);
-                        return ci;
-                    }
-                }
-
-                return { ...ci, quantity: newQty };
-            }).filter(ci => ci.quantity > 0)
-        );
+        setCartItems(prev => prev.map(ci => {
+            if (ci.id !== id) return ci;
+            const newQty = ci.quantity + delta;
+            if (newQty <= 0) return { ...ci, quantity: 0 };
+            if (delta > 0 && ci.type === 'product') {
+                const catItem = catalog.find(c => c.id === ci.id);
+                if (catItem && newQty > (catItem.current_stock ?? 0)) { toast.error(`Estoque insuficiente.`); return ci; }
+            }
+            return { ...ci, quantity: newQty };
+        }).filter(ci => ci.quantity > 0));
     };
 
     const selectClient = async (c) => {
-        setClientId(c.id);
-        setClientSearch(c.name);
-        setShowClientDropdown(false);
-
+        setClientId(c.id); setClientSearch(c.name); setShowClientDropdown(false);
         if (c.is_subscriber) {
             const { data: sub } = await supabase.from('client_subscriptions').select('*, plans(haircut_limit, shave_limit)').eq('client_id', c.id).single();
             if (sub) {
                 let remainC = (sub.plans?.haircut_limit ?? 999) - (sub.haircuts_used || 0);
                 let remainB = (sub.plans?.shave_limit ?? 999) - (sub.shaves_used || 0);
-                
                 setCartItems(prev => {
                     let newCart = prev.filter(item => !item.name.includes('(Plano)') && !item.name.includes('do Plano'));
-                    if (remainC > 0 && remainB > 0) {
-                        newCart.push({ id: 'plano-corte', type: 'service', name: 'Corte do Plano', price: 0, quantity: 1 });
-                        newCart.push({ id: 'plano-barba', type: 'service', name: 'Barba do Plano', price: 0, quantity: 1 });
-                    } else if (remainC > 0) {
-                        newCart.push({ id: 'plano-corte', type: 'service', name: 'Corte do Plano', price: 0, quantity: 1 });
-                    } else if (remainB > 0) {
-                        newCart.push({ id: 'plano-barba', type: 'service', name: 'Barba do Plano', price: 0, quantity: 1 });
-                    }
+                    if (remainC > 0) newCart.push({ id: 'plano-corte', type: 'service', name: 'Corte do Plano', price: 0, quantity: 1 });
+                    if (remainB > 0) newCart.push({ id: 'plano-barba', type: 'service', name: 'Barba do Plano', price: 0, quantity: 1 });
                     return newCart;
                 });
             }
         }
     };
 
-    // ── SAVE to Supabase ──
     const handleSave = async () => {
-        if (!professionalId || !date || !time) {
-            toast.error('Preencha os campos obrigatórios (Profissional, Data e Horário).');
-            return;
-        }
+        if (!professionalId || !date || !time) { toast.error('Preencha os campos obrigatórios.'); return; }
+        if (!isAvulso && !clientId) { toast.error('Selecione um cliente ou marque Serviço Avulso.'); return; }
 
-        if (!isAvulso && !clientId) {
-            toast.error('Selecione um cliente válido (pesquise e clique na lista) ou marque como Serviço Avulso.');
-            return;
-        }
-
-        // ── Build a LOCAL Date object from the form inputs ──
-        // Using the multi-arg constructor guarantees local timezone interpretation.
-        // Example: user picks "13:00" in UTC-3 → localDate.getHours() === 13
-        //          .toISOString() → "…T16:00:00.000Z" (correct UTC representation)
         const [y, mo, d] = date.split('-').map(Number);
         const [h, mi] = time.split(':').map(Number);
         const localDate = new Date(y, mo - 1, d, h, mi, 0);
 
-        // ── Double-booking check (against loaded appointments) ──
         const conflict = (appointments || []).find(a => {
-            if (a.professional_id !== professionalId) return false;
-            if (a.status === 'no_show' || a.status === 'canceled') return false; // freeing the slot mathematically
-            const existing = new Date(a.scheduled_at);
-            return existing.getFullYear() === localDate.getFullYear()
-                && existing.getMonth() === localDate.getMonth()
-                && existing.getDate() === localDate.getDate()
-                && existing.getHours() === localDate.getHours()
-                && existing.getMinutes() === localDate.getMinutes();
+            if (a.professional_id !== professionalId || ['no_show', 'canceled'].includes(a.status)) return false;
+            const ex = new Date(a.scheduled_at);
+            return ex.getTime() === localDate.getTime();
         });
-
-        if (conflict) {
-            toast.error('Este profissional já possui um agendamento neste horário.');
-            return;
-        }
+        if (conflict) { toast.error('Este profissional já possui um agendamento neste horário.'); return; }
 
         setSaving(true);
         try {
-            // Send as ISO string — Supabase stores correct UTC instant,
-            // and JS new Date(...).getHours() will return correct local hours on read-back.
-            const scheduledAt = localDate.toISOString();
+            const { data: order, error } = await supabase.from('orders').insert({ barbershop_id: barbershopId, professional_id: professionalId, client_id: clientId || null, scheduled_at: localDate.toISOString(), total_amount: parseFloat(totalAmount), status: 'scheduled', origin, ...(isAvulso && avulsoNotes ? { notes: avulsoNotes } : {}) }).select('id').single();
+            if (error) throw error;
 
-            const { data: order, error: orderError } = await supabase
-                .from('orders')
-                .insert({
-                    barbershop_id: barbershopId || null,
-                    professional_id: professionalId || null,
-                    client_id: clientId || null,
-                    scheduled_at: scheduledAt,
-                    total_amount: parseFloat(totalAmount) || 0,
-                    status: 'scheduled',
-                    origin: origin,
-                    ...(isAvulso && avulsoNotes ? { notes: avulsoNotes } : {}),
-                })
-                .select('id')
-                .single();
-
-            if (orderError) {
-                console.error('Erro no Supabase:', orderError);
-                toast.error('Erro ao salvar no banco: ' + orderError.message);
-                setSaving(false);
-                return;
-            }
-
-            // Insert order_items (skip if avulso)
             if (!isAvulso && cartItems.length > 0 && order?.id) {
-                const items = cartItems.map(ci => ({
-                    order_id: order.id,
-                    item_type: ci.type,
-                    name: ci.name,
-                    quantity: ci.quantity,
-                    price: ci.price,
-                }));
-
-                const { error: itemsError } = await supabase
-                    .from('order_items')
-                    .insert(items);
-
-                if (itemsError) throw itemsError;
-
-                // ── DEDUCT Subscription Usages (plan-aware) ──
+                await supabase.from('order_items').insert(cartItems.map(ci => ({ order_id: order.id, item_type: ci.type, name: ci.name, quantity: ci.quantity, price: ci.price })));
                 const clientObj = clients.find(c => c.id === clientId);
                 if (clientObj?.is_subscriber) {
-                    let cortes_used = 0, barbas_used = 0;
+                    let cu = 0, bu = 0;
                     cartItems.forEach(ci => {
-                        const n = (ci.name || '').toLowerCase();
-                        if (n.includes('corte') || n.includes('cabelo')) cortes_used += ci.quantity;
-                        if (n.includes('barba')) barbas_used += ci.quantity;
+                        if (ci.name.toLowerCase().includes('corte') || ci.name.toLowerCase().includes('cabelo')) cu += ci.quantity;
+                        if (ci.name.toLowerCase().includes('barba')) bu += ci.quantity;
                     });
-                    if (cortes_used > 0 || barbas_used > 0) {
-                        // Fetch subscription WITH plan limits
-                        const { data: sub } = await supabase
-                            .from('client_subscriptions')
-                            .select('*, plans(haircut_limit, shave_limit)')
-                            .eq('client_id', clientId)
-                            .single();
+                    if (cu > 0 || bu > 0) {
+                        const { data: sub } = await supabase.from('client_subscriptions').select('*, plans(haircut_limit, shave_limit)').eq('client_id', clientId).single();
                         if (sub) {
-                            const haircutLimit = sub.plans?.haircut_limit ?? 999;
-                            const shaveLimit   = sub.plans?.shave_limit   ?? 999;
-                            // Only count services that the plan actually includes
-                            const effectiveCortes = haircutLimit > 0 ? cortes_used : 0;
-                            const effectiveBarbas = shaveLimit   > 0 ? barbas_used : 0;
-                            if (effectiveCortes > 0 || effectiveBarbas > 0) {
-                                await supabase.from('client_subscriptions').update({
-                                    haircuts_used: (sub.haircuts_used || 0) + effectiveCortes,
-                                    shaves_used:   (sub.shaves_used   || 0) + effectiveBarbas
-                                }).eq('id', sub.id);
-                            }
+                            await supabase.from('client_subscriptions').update({ haircuts_used: (sub.haircuts_used || 0) + (sub.plans?.haircut_limit > 0 ? cu : 0), shaves_used: (sub.shaves_used || 0) + (sub.plans?.shave_limit > 0 ? bu : 0) }).eq('id', sub.id);
                         }
                     }
                 }
             }
-
             onSaved();
-        } catch (err) {
-            toast.error(`Erro ao salvar: ${err.message}`);
-        } finally {
-            setSaving(false);
-        }
+        } catch (err) { toast.error(`Erro: ${err.message}`); } finally { setSaving(false); }
     };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-
-            <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl shadow-black/40 mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                {/* Title */}
+            <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-red-600/15 rounded-xl flex items-center justify-center">
-                            <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold text-slate-100">Novo Agendamento</h3>
-                            <p className="text-xs text-slate-500">Preencha os dados abaixo</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
+                    <h3 className="text-lg font-bold text-slate-100">Novo Agendamento</h3>
+                    <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-200 transition-colors">✕</button>
                 </div>
-
                 <div className="space-y-4">
-                    {/* Professional */}
                     <div>
-                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Profissional *</label>
-                        <select value={professionalId} onChange={e => setProfessionalId(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors appearance-none cursor-pointer">
+                        <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">Profissional *</label>
+                        <select value={professionalId} onChange={e => setProfessionalId(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 outline-none focus:border-red-600 transition-colors">
                             <option value="">Selecione o barbeiro</option>
                             {professionals.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                     </div>
-
-                    {/* Date + Time */}
                     <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Data *</label>
-                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Horário *</label>
-                            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
-                        </div>
+                        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 outline-none" />
+                        <input type="time" value={time} onChange={e => setTime(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 outline-none" />
                     </div>
-
-                    {/* Client (searchable combo) */}
                     <div className="relative">
-                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Cliente *</label>
-                        <input
-                            type="text"
-                            value={clientSearch}
-                            onChange={e => { setClientSearch(e.target.value); setClientId(''); setShowClientDropdown(true); }}
-                            onFocus={() => setShowClientDropdown(true)}
-                            placeholder="Buscar cliente..."
-                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
-                        />
-                        {clientId && (
-                            <div className="absolute right-3 top-9 text-xs text-red-500">✓</div>
-                        )}
-                        {/* Client dropdown */}
+                        <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">Cliente *</label>
+                        <input type="text" value={clientSearch} onChange={e => { setClientSearch(e.target.value); setClientId(''); setShowClientDropdown(true); }} onFocus={() => setShowClientDropdown(true)} placeholder="Buscar cliente..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 outline-none focus:border-red-600 transition-colors" />
                         {showClientDropdown && filteredClients.length > 0 && !clientId && (
-                            <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl shadow-black/40 max-h-48 overflow-y-auto">
+                            <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                                 {filteredClients.map(c => (
-                                    <button key={c.id} onClick={() => selectClient(c)} className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors">
-                                        <span>{c.name}</span>
-                                        {c.is_subscriber && (
-                                            <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#111', color: '#B59410', boxShadow: '0 0 0 1px rgba(181,148,16,0.4)' }}>★ Assinante</span>
-                                        )}
+                                    <button key={c.id} onClick={() => selectClient(c)} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 transition-colors">
+                                        {c.name} {c.is_subscriber && <span className="ml-2 text-[10px] text-yellow-500 font-bold">★ Assinante</span>}
                                     </button>
                                 ))}
                             </div>
                         )}
-
-                        {/* Plan info banner for subscriber */}
-                        {clientId && subLoading && (
-                            <p className="text-xs text-slate-500 mt-2">Carregando plano...</p>
-                        )}
                         {clientId && !subLoading && clientSub && (
-                            <div className="mt-2 px-4 py-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-start gap-3">
-                                <span className="text-yellow-400 text-base font-bold flex-shrink-0">★</span>
-                                <div>
-                                    <p className="text-xs font-bold text-yellow-300">{clientSub.plans?.name || 'Plano ativo'}</p>
-                                    <p className="text-[11px] text-slate-400 mt-0.5">
-                                        {clientSub.plans?.haircut_limit > 0
-                                            ? `Cortes: ${clientSub.haircuts_used}/${clientSub.plans.haircut_limit}`
-                                            : 'Sem cortes no plano'}
-                                        {' · '}
-                                        {clientSub.plans?.shave_limit > 0
-                                            ? `Barbas: ${clientSub.shaves_used}/${clientSub.plans.shave_limit}`
-                                            : 'Sem barba no plano'}
-                                    </p>
-                                </div>
+                            <div className="mt-2 text-[11px] text-yellow-400 bg-yellow-500/10 p-2 rounded-lg border border-yellow-500/20">
+                                ★ {clientSub.plans?.name}: C: {clientSub.haircuts_used}/{clientSub.plans?.haircut_limit} · B: {clientSub.shaves_used}/{clientSub.plans?.shave_limit}
                             </div>
                         )}
                     </div>
-
-                    {/* Origin */}
                     <div>
-                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Origem do Agendamento</label>
-                        <select value={origin} onChange={e => setOrigin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors appearance-none cursor-pointer">
-                            <option value="reception">Recepção</option>
-                            <option value="app">Aplicativo</option>
-                            <option value="whatsapp">WhatsApp</option>
-                            <option value="phone">Telefone</option>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">Origem</label>
+                        <select value={origin} onChange={e => setOrigin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 outline-none">
+                            <option value="reception">Recepção</option><option value="app">App</option><option value="whatsapp">WhatsApp</option><option value="phone">Telefone</option>
                         </select>
                     </div>
-
-                    {/* ── Avulso Toggle ── */}
                     <div className="flex items-center gap-3">
-                        <button
-                            type="button"
-                            onClick={() => setIsAvulso(!isAvulso)}
-                            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${isAvulso ? 'bg-red-600' : 'bg-slate-600'}`}
-                        >
-                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ${isAvulso ? 'translate-x-5' : 'translate-x-0'}`} />
-                        </button>
-                        <span className="text-sm text-slate-300">Serviço Avulso / Não especificado</span>
+                        <input type="checkbox" checked={isAvulso} onChange={e => setIsAvulso(e.target.checked)} className="accent-red-600" />
+                        <span className="text-sm text-slate-300">Serviço Avulso</span>
                     </div>
-
                     {isAvulso ? (
-                        /* ── Avulso Fields ── */
                         <div className="space-y-3">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Valor Estimado (opcional)</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    max="10000"
-                                    value={avulsoValue}
-                                    onChange={e => setAvulsoValue(e.target.value)}
-                                    placeholder="0,00"
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Observação / Descrição</label>
-                                <textarea
-                                    value={avulsoNotes}
-                                    onChange={e => setAvulsoNotes(e.target.value)}
-                                    placeholder="Ex: Corte + algo a decidir..."
-                                    rows={2}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors resize-none"
-                                />
-                            </div>
+                            <input type="number" step="0.01" value={avulsoValue} onChange={e => setAvulsoValue(e.target.value)} placeholder="Valor R$ 0,00" className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100" />
+                            <textarea value={avulsoNotes} onChange={e => setAvulsoNotes(e.target.value)} placeholder="Observações..." className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 resize-none h-16" />
                         </div>
                     ) : (
-                        /* ── Cart: Add Service/Product ── */
                         <>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Serviços & Produtos</label>
-                                <select
-                                    value={catalogSelect}
-                                    onChange={e => addToCart(e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors appearance-none cursor-pointer"
-                                >
-                                    <option value="">Adicionar serviço ou produto...</option>
-                                    {catalog.filter(c => c.type === 'service').length > 0 && (
-                                        <optgroup label="Serviços">
-                                            {catalog.filter(c => c.type === 'service').map(c => (
-                                                <option key={c.id} value={c.id}>{c.name} — {formatCurrency(c.price)}</option>
-                                            ))}
-                                        </optgroup>
-                                    )}
-                                    {catalog.filter(c => c.type === 'product').length > 0 && (
-                                        <optgroup label="Produtos">
-                                            {catalog.filter(c => c.type === 'product').map(c => {
-                                                const isOut = (c.current_stock ?? 0) <= 0;
-                                                return (
-                                                    <option key={c.id} value={c.id} disabled={isOut}>
-                                                        {c.name} — {formatCurrency(c.price)}{isOut ? ' [ESGOTADO]' : c.current_stock <= 5 ? ` (${c.current_stock} un.)` : ''}
-                                                    </option>
-                                                );
-                                            })}
-                                        </optgroup>
-                                    )}
-                                </select>
-                            </div>
-
-                            {/* ── Cart Items List ── */}
-                            {cartItems.length > 0 && (
-                                <div className="space-y-2">
-                                    {cartItems.map(ci => (
-                                        <div key={ci.id} className="flex items-center gap-3 bg-slate-900/60 rounded-xl px-4 py-2.5 border border-slate-700/50">
-                                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ci.type === 'service' ? 'bg-blue-400' : 'bg-amber-400'}`} />
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm text-slate-200 truncate">{ci.name}</p>
-                                                <p className="text-[11px] text-slate-500">{formatCurrency(ci.price)} un.</p>
-                                            </div>
-
-                                            {/* Quantity controls */}
-                                            <div className="flex items-center gap-1.5">
-                                                <button
-                                                    onClick={() => updateQty(ci.id, -1)}
-                                                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
-                                                >−</button>
-                                                <span className="w-6 text-center text-sm font-semibold text-slate-100">{ci.quantity}</span>
-                                                <button
-                                                    onClick={() => updateQty(ci.id, 1)}
-                                                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center text-sm font-bold transition-colors"
-                                                >+</button>
-                                            </div>
-
-                                            <p className="text-sm font-semibold text-slate-100 w-24 text-right">{formatCurrency(ci.price * ci.quantity)}</p>
-                                        </div>
-                                    ))}
+                            <select value={catalogSelect} onChange={e => addToCart(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 outline-none focus:border-red-600 transition-colors">
+                                <option value="">Adicionar item...</option>
+                                {catalog.map(c => <option key={c.id} value={c.id} disabled={c.type==='product'&&c.current_stock<=0}>{c.name} — {formatCurrency(c.price)}</option>)}
+                            </select>
+                            {cartItems.map(ci => (
+                                <div key={ci.id} className="flex items-center justify-between bg-slate-900/40 p-2 rounded-lg text-sm text-slate-200">
+                                    <span className="truncate flex-1">{ci.name}</span>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => updateQty(ci.id, -1)} className="w-6 h-6 bg-slate-700 rounded-md">-</button>
+                                        <span>{ci.quantity}</span>
+                                        <button onClick={() => updateQty(ci.id, 1)} className="w-6 h-6 bg-slate-700 rounded-md">+</button>
+                                    </div>
                                 </div>
-                            )}
+                            ))}
                         </>
                     )}
-
-                    {/* ── Total ── */}
-                    <div className="flex items-center justify-between pt-2">
-                        <p className="text-sm text-slate-400">Total</p>
-                        <p className="text-lg font-bold text-red-500">{formatCurrency(totalAmount)}</p>
+                    <div className="flex justify-between items-center pt-2 font-bold text-red-500">
+                        <span>Total</span><span>{formatCurrency(totalAmount)}</span>
                     </div>
                 </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-3 mt-6 pt-5 border-t border-slate-700">
-                    <button onClick={onClose} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors disabled:opacity-50">
-                        Cancelar
-                    </button>
-                    <button onClick={handleSave} disabled={saving} className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
-                        {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                        {saving ? 'Salvando...' : 'Salvar Agendamento'}
+                <div className="flex gap-3 mt-6">
+                    <button onClick={onClose} className="flex-1 py-3 bg-slate-700 rounded-xl text-slate-100 font-semibold transition-colors hover:bg-slate-600">Cancelar</button>
+                    <button onClick={handleSave} disabled={saving} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-semibold transition-colors hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                        {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />} {saving ? 'Salvando...' : 'Confirmar'}
                     </button>
                 </div>
             </div>
@@ -1152,190 +743,46 @@ function AppointmentModal({
     );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   ORDER DETAILS MODAL — View appointment details
-   ═══════════════════════════════════════════════════════════════ */
 function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCancel, onNoShow, onOpenComanda }) {
-    const [actionLoading, setActionLoading] = useState(false);
     const dt = new Date(order.scheduled_at);
     const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
     const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
     const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.scheduled;
-    const statusLabel = order.status === 'open' ? 'Comanda Aberta' : statusCfg.label;
-    const clientName = clientMap[order.client_id] || 'Cliente';
-    const proName = proMap[order.professional_id] || 'Profissional';
-
-    const originMap = {
-        'reception': 'Recepção',
-        'app': 'Aplicativo',
-        'whatsapp': 'WhatsApp',
-        'phone': 'Telefone',
-    };
-    const originStr = originMap[order.origin] || 'Não informada';
-
-    const handleCancel = async () => {
-        if (!confirm('Tem certeza que deseja cancelar este agendamento?')) return;
-        setActionLoading(true);
-        await onCancel();
-        setActionLoading(false);
-    };
-
-    const handleNoShow = async () => {
-        if (!confirm('Marcar este cliente como "Não Compareceu"?')) return;
-        setActionLoading(true);
-        await onNoShow();
-        setActionLoading(false);
-    };
-
-    const handleDelete = async () => {
-        if (!confirm('Tem certeza que deseja EXCLUIR este agendamento? Esta ação não pode ser desfeita.')) return;
-        setActionLoading(true);
-        await onDelete();
-        setActionLoading(false);
-    };
-
-    const handleOpenComanda = async () => {
-        setActionLoading(true);
-        await onOpenComanda();
-        setActionLoading(false);
-    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-
-            <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl shadow-black/40 mx-4" onClick={e => e.stopPropagation()}>
-                {/* Header */}
+            <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl mx-4" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-red-600/15 rounded-xl flex items-center justify-center">
-                            <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold text-slate-100">{clientName}</h3>
-                            <p className="text-xs text-slate-500">Detalhes do agendamento</p>
-                        </div>
+                    <h3 className="text-lg font-bold text-slate-100">{clientMap[order.client_id] || 'Cliente'}</h3>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusCfg.bg} ${statusCfg.text} border ${statusCfg.border}`}>{statusCfg.label}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-700/50">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">Data/Hora</p>
+                        <p className="text-sm font-semibold text-slate-100">{dateStr} {timeStr}</p>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <span className={`inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-semibold ${statusCfg.bg} ${statusCfg.text} border ${statusCfg.border}`}>
-                            {statusLabel}
-                        </span>
-                        <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
+                    <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-700/50">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">Barbeiro</p>
+                        <p className="text-sm font-semibold text-slate-100">{proMap[order.professional_id] || 'N/A'}</p>
+                    </div>
+                    <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-700/50 col-span-2">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">Valor</p>
+                        <p className="text-base font-bold text-red-500">{formatCurrency(order.total_amount)}</p>
                     </div>
                 </div>
-
-                {/* Info Grid */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Data</p>
-                        <p className="text-sm font-semibold text-slate-100">{dateStr}</p>
-                    </div>
-                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Horário</p>
-                        <p className="text-sm font-semibold text-slate-100">{timeStr}</p>
-                    </div>
-                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Barbeiro</p>
-                        <p className="text-sm font-semibold text-slate-100">{proName}</p>
-                    </div>
-                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Origem</p>
-                        <p className="text-sm font-semibold text-slate-100 capitalize">{originStr}</p>
-                    </div>
-                    <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50 col-span-2">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Valor</p>
-                        <p className="text-sm font-bold text-red-500">{formatCurrency(order.total_amount)}</p>
-                    </div>
-                </div>
-
-                {/* Order ID */}
-                <div className="bg-slate-900/40 rounded-lg px-4 py-2 mb-6 border border-slate-700/30">
-                    <p className="text-[11px] text-slate-500">ID do pedido: <span className="text-slate-400 font-mono">{order.id?.slice(0, 8)}...</span></p>
-                </div>
-
-                {/* Actions */}
-                {['canceled', 'closed', 'no_show'].includes(order.status) ? (
-                    <div className="pt-4 border-t border-slate-700 space-y-3">
-                        <p className="text-center text-sm text-slate-500 italic">
-                            {order.status === 'no_show' ? '⚠️ Cliente não compareceu a este agendamento.' : 'Nenhuma ação disponível para este status.'}
-                        </p>
-                        {order.status === 'no_show' && (
-                            <button
-                                onClick={handleDelete}
-                                disabled={actionLoading}
-                                className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors text-white bg-rose-500 hover:bg-rose-600 shadow-lg shadow-rose-500/20 disabled:opacity-50"
-                            >
-                                {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                )}
-                                Excluir Agendamento
-                            </button>
-                        )}
-                    </div>
-                ) : (
-                    <div className="space-y-3 pt-4 border-t border-slate-700">
-                        {/* Main actions row */}
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={handleCancel}
-                                disabled={actionLoading || order.status === 'open'}
-                                className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border ${order.status === 'open'
-                                    ? 'text-slate-500 bg-slate-800 border-slate-700 cursor-not-allowed opacity-50'
-                                    : 'text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50'
-                                    }`}
-                            >
-                                {actionLoading ? <div className="w-4 h-4 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin" /> : (
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                )}
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={order.status !== 'open' ? handleOpenComanda : undefined}
-                                disabled={actionLoading || order.status === 'open'}
-                                className={`flex-1 px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${order.status === 'open'
-                                    ? 'text-amber-300 bg-amber-500/10 border border-amber-500/20 cursor-not-allowed opacity-70'
-                                    : 'text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50'
-                                    }`}
-                            >
-                                {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
-                                    order.status === 'open' ? (
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                    ) : (
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                                    )
-                                )}
-                                {order.status === 'open' ? 'Comanda Aberta' : 'Abrir Comanda'}
-                            </button>
+                <div className="space-y-3 pt-4 border-t border-slate-700">
+                    {!['canceled', 'closed', 'no_show'].includes(order.status) && (
+                        <div className="flex gap-3">
+                            <button onClick={onCancel} className="flex-1 py-3 text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl font-bold hover:bg-rose-500/20">Cancelar</button>
+                            <button onClick={onOpenComanda} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-red-600/20">Abrir Comanda</button>
                         </div>
-                        {/* No-show button */}
-                        {order.status !== 'open' && (
-                            <button
-                                onClick={handleNoShow}
-                                disabled={actionLoading}
-                                className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border text-slate-400 bg-slate-800 border-slate-600 hover:bg-slate-700 hover:text-slate-200 disabled:opacity-50"
-                            >
-                                {actionLoading ? <div className="w-4 h-4 border-2 border-slate-400/30 border-t-slate-400 rounded-full animate-spin" /> : (
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
-                                )}
-                                Marcar como Falta / Não Compareceu
-                            </button>
-                        )}
-                        <button
-                            onClick={handleDelete}
-                            disabled={actionLoading}
-                            className="w-full px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors text-white bg-rose-500 hover:bg-rose-600 shadow-lg shadow-rose-500/20 disabled:opacity-50"
-                        >
-                            {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            )}
-                            Excluir Agendamento
-                        </button>
-                    </div>
-                )}
+                    )}
+                    {order.status !== 'closed' && (
+                        <button onClick={onNoShow} className="w-full py-3 bg-slate-700 text-slate-300 rounded-xl font-bold hover:bg-slate-600">Marcar Falta</button>
+                    )}
+                    <button onClick={onDelete} className="w-full py-3 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 shadow-rose-500/20">Excluir</button>
+                </div>
             </div>
         </div>
     );

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { formatDate, formatTime, formatDateTime, getLocalDateISO } from '../utils/dateUtils';
+import { getStatusLabel, formatCurrency } from '../utils/orderUtils';
 
 export default function useDashboardData() {
     const [loading, setLoading] = useState(true);
@@ -61,29 +63,31 @@ export default function useDashboardData() {
 
                 // --- Variáveis de data ---
                 const today = new Date();
-                const localDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const todayStr = getLocalDateISO(today);
 
-                const startOfDayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).toISOString();
-                const endOfDayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).toISOString();
+                // Boundaries for today
+                const startOfDayISO = new Date(`${todayStr}T00:00:00`).toISOString();
+                const endOfDayISO = new Date(`${todayStr}T23:59:59.999`).toISOString();
 
-                const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
-                const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
-                const startOfMonthISO = startOfMonth.toISOString();
-                const endOfMonthISO = endOfMonth.toISOString();
+                // Month boundaries
+                const startOfMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+                const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                const endOfMonthStr = getLocalDateISO(endOfMonth);
+                
+                const startOfMonthISO = new Date(`${startOfMonthStr}T00:00:00`).toISOString();
+                const endOfMonthISO = new Date(`${endOfMonthStr}T23:59:59.999`).toISOString();
 
-                const todayISO = localDate(today);
                 const in30Days = new Date(today);
                 in30Days.setDate(in30Days.getDate() + 30);
-                const in30DaysISO = localDate(in30Days);
+                const in30DaysStr = getLocalDateISO(in30Days);
 
-                // --- REFATORAÇÃO: O CÉREBRO DO DASHBOARD ---
-                // Busca TODOS os agendamentos agendados para este mês (apenas colunas necessárias)
+                // Busca TODOS os agendamentos relevantes (este mês + próximos 30 dias para "Próximos")
                 const { data: rawOrdersData } = await supabase
                     .from('orders')
                     .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone)')
                     .eq('barbershop_id', bId)
                     .or(`scheduled_at.gte.${startOfMonthISO},created_at.gte.${startOfMonthISO}`)
-                    .or(`scheduled_at.lte.${endOfMonthISO},created_at.lte.${endOfMonthISO}`);
+                    .or(`scheduled_at.lte.${in30DaysStr},created_at.lte.${in30DaysStr}`);
 
                 // NOVO: Chama o RPC para pegar as métricas agregadas
                 const { data: summaryData, error: summaryErr } = await supabase.rpc('get_dashboard_summary', {
@@ -92,7 +96,7 @@ export default function useDashboardData() {
                     p_end_month: endOfMonthISO,
                     p_start_today: startOfDayISO,
                     p_end_today: endOfDayISO,
-                    p_date_today: localDate(today)
+                    p_date_today: todayStr
                 });
                 if (summaryErr) console.error("Erro no RPC dashboard:", summaryErr.message);
 
@@ -134,58 +138,53 @@ export default function useDashboardData() {
                     const amount = parseFloat(o.total_amount || 0);
 
                     // REGRA DE HOJE: comparar scheduled_at com data de hoje logica simplificada
-                    const isHoje = o.scheduled_at && new Date(o.scheduled_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
+                    const isHoje = o.scheduled_at && getLocalDateISO(o.scheduled_at) === todayStr;
                     const isScheduledToday = isHoje;
-                    const isClosedToday = o.closed_at && new Date(o.closed_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
+                    const isClosedToday = o.closed_at && getLocalDateISO(o.closed_at) === todayStr;
                     const isClosedThisMonth = status === 'closed';
 
                     // 2. Comandas Abertas (globais, independentes do mês)
                     if (status === 'open') {
                         // contagem no RPC
-                        const d = o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at);
-                        const cDate = new Date(o.created_at);
                         detalheComandasAbertas.push({
                             _id: o.id,
-                            hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+                            hora: formatTime(o.scheduled_at || o.created_at),
                             cliente: o.clients?.name || 'Cliente Avulso',
                             barbeiro: o.professionals?.name || 'Sem Barbeiro',
-                            valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
-                            created_at: `${String(cDate.getDate()).padStart(2, '0')}/${String(cDate.getMonth() + 1).padStart(2, '0')} ${String(cDate.getHours()).padStart(2, '0')}:${String(cDate.getMinutes()).padStart(2, '0')}` // Data amigável
+                            valor: formatCurrency(amount),
+                            created_at: formatDateTime(o.created_at) // Data amigável
                         });
                     }
 
                     // 3. Faturamento Mês e Meta (O faturamento total vem do RPC, aqui é só pro gráfico da meta)
                     if (isClosedThisMonth) {
-                        const dateForMeta = o.closed_at ? new Date(o.closed_at) : (o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at));
-                        const dayKey = localDate(dateForMeta);
+                        const dateForMeta = o.closed_at || o.scheduled_at || o.created_at;
+                        const dayKey = getLocalDateISO(dateForMeta);
                         if (!dailyMetaMap[dayKey]) dailyMetaMap[dayKey] = 0;
                         dailyMetaMap[dayKey] += amount;
                     }
 
                     // Faturamento 7 dias
                     if (status === 'closed') {
-                        const dateFor7Days = o.closed_at ? new Date(o.closed_at) : (o.scheduled_at ? new Date(o.scheduled_at) : new Date(o.created_at));
-                        const closedDateKey = localDate(dateFor7Days);
+                        const dateFor7Days = o.closed_at || o.scheduled_at || o.created_at;
+                        const closedDateKey = getLocalDateISO(dateFor7Days);
                         if (!last7DaysData[closedDateKey]) last7DaysData[closedDateKey] = 0;
                         last7DaysData[closedDateKey] += amount;
                     }
 
                     // 5. Funil (Agendados neste mês) (listas visuais)
                     if (true) {
-                        const d = new Date(o.created_at || o.scheduled_at);
-                        const statusLabels = { closed: 'Fechado', open: 'Aberto', scheduled: 'Agendado', 'no_show': 'No-show', canceled: 'Cancelado' };
-                        const cDate = new Date(o.scheduled_at || o.created_at);
                         detalheConversaoMes.push({
-                            data: `${String(cDate.getDate()).padStart(2, '0')}/${String(cDate.getMonth() + 1).padStart(2, '0')} ${String(cDate.getHours()).padStart(2, '0')}:${String(cDate.getMinutes()).padStart(2, '0')}`,
+                            data: formatDateTime(o.scheduled_at || o.created_at),
                             cliente: o.clients?.name || 'Cliente Avulso',
                             barbeiro: o.professionals?.name || 'Sem Barbeiro',
-                            status: statusLabels[status] || status,
-                            valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
+                            status: getStatusLabel(status),
+                            valor: formatCurrency(amount),
                             _created_at: o.created_at
                         });
                     }
 
-                    const isCreatedToday = o.created_at && new Date(o.created_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR');
+                    const isCreatedToday = o.created_at && getLocalDateISO(o.created_at) === todayStr;
 
                     // Modal "Não Compareceu" / Cancelados DE HOJE ESTITAMENTE
                     if (isScheduledToday || isCreatedToday) {
@@ -193,24 +192,23 @@ export default function useDashboardData() {
                         if (status === 'canceled') canceledOrdersToday.push(o);
                     }
 
-                    if (isScheduledToday) {
-                        // 6. Próximos Atendimentos
-                        if (status === 'scheduled' && o.scheduled_at) {
-                            const schedTime = new Date(o.scheduled_at).getTime();
-                            if (schedTime > nowMs) {
-                                const d2 = new Date(o.scheduled_at);
-                                const bName = o.professionals?.name || 'Sem Nome';
-                                const initials = bName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
-                                proximosAtendimentos.push({
-                                    _id: o.id,
-                                    orderInfo: { ...o, client_name: o.clients?.name, professional_name: bName },
-                                    nome: bName,
-                                    initials,
-                                    cliente: o.clients?.name || 'Avulso',
-                                    hora: `${String(d2.getHours()).padStart(2, '0')}:${String(d2.getMinutes()).padStart(2, '0')}`,
-                                    scheduled_at: o.scheduled_at // sort key
-                                });
-                            }
+                    // 6. Próximos Atendimentos (Qualquer agendamento futuro a partir de agora)
+                    if (status === 'scheduled' && o.scheduled_at) {
+                        const schedTime = new Date(o.scheduled_at).getTime();
+                        if (schedTime > nowMs) {
+                            const d2 = new Date(o.scheduled_at);
+                            const bName = o.professionals?.name || 'Sem Nome';
+                            const initials = bName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+                            proximosAtendimentos.push({
+                                _id: o.id,
+                                orderInfo: { ...o, client_name: o.clients?.name, professional_name: bName },
+                                nome: bName,
+                                initials,
+                                cliente: o.clients?.name || 'Avulso',
+                                hora: formatTime(o.scheduled_at),
+                                data: formatDate(o.scheduled_at).substring(0, 5), // 'DD/MM'
+                                scheduled_at: o.scheduled_at // sort key
+                            });
                         }
                     }
 
@@ -219,10 +217,10 @@ export default function useDashboardData() {
                         const d = o.closed_at ? new Date(o.closed_at) : new Date(o.scheduled_at);
                         const pushObj = {
                             _id: o.id,
-                            hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+                            hora: formatTime(o.closed_at || o.scheduled_at),
                             cliente: o.clients?.name || 'Cliente Avulso',
                             barbeiro: o.professionals?.name || 'Sem Barbeiro',
-                            valor: `R$ ${amount.toFixed(2).replace('.', ',')}`,
+                            valor: formatCurrency(amount),
                         };
                         
                         // Push into detailed views
@@ -242,23 +240,24 @@ export default function useDashboardData() {
 
                 // Meta Mensal Map
                 const detalheMetaMes = Object.entries(dailyMetaMap).map(([dayKey, total]) => {
-                    const d = new Date(dayKey + 'T12:00:00');
                     return {
-                        dia: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`,
-                        faturamento: `R$ ${total.toFixed(2).replace('.', ',')}`,
+                        dia: formatDate(dayKey).substring(0, 5), // 'DD/MM'
+                        faturamento: formatCurrency(total),
                     };
                 }).sort((a, b) => a.dia.localeCompare(b.dia));
 
                 // Helper Funnel Detail
                 const enrichDetail = (arr) => arr.map(o => {
                     const d = o.scheduled_at ? new Date(o.scheduled_at) : null;
+                    const timeStr = new Date(o.scheduled_at || o.created_at).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+                    const dateStr = new Date(o.scheduled_at || o.created_at).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' });
                     return {
                         id: o.id,
                         orderInfo: { ...o, client_name: o.clients?.name, professional_name: o.professionals?.name },
                         cliente: o.clients?.name || 'Cliente Avulso',
                         profissional: o.professionals?.name || 'Sem nome', // CORRIGIDO: profiles -> professionals
-                        horario: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—',
-                        data: d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` : '—',
+                        horario: timeStr,
+                        data: dateStr,
                     };
                 });
 
@@ -444,13 +443,13 @@ export default function useDashboardData() {
                     const d = new Date(c.birth_date);
                     return d.getMonth() + 1 === currentMonth;
                 }).map((c) => {
-                    const d = new Date(c.birth_date);
-                    return { nome: c.name, data: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`, phone: c.phone || '' };
+                    const d = new Date(c.birth_date + 'T12:00:00');
+                    return { nome: c.name, data: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), phone: c.phone || '' };
                 });
                 const aniversariantesSemana = (allClients || []).filter((c) => c.birth_date && isBirthdayInWindow(c.birth_date, 7)).map((c) => {
-                    const d = new Date(c.birth_date);
+                    const d = new Date(c.birth_date + 'T12:00:00');
                     const phoneClean = cleanPhone(c.phone);
-                    return { nome: c.name, data: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`, whatsapp: phoneClean ? `https://wa.me/55${phoneClean}` : '' };
+                    return { nome: c.name, data: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), whatsapp: phoneClean ? `https://wa.me/55${phoneClean}` : '' };
                 });
 
                 // Clientes para recompra
@@ -472,7 +471,12 @@ export default function useDashboardData() {
                         if (!order) return;
                         const d = new Date(order.created_at);
                         const clientInfo = recompraClientMap[order.client_id] || { name: 'Sem nome', phone: '' };
-                        recompraList.push({ nome: clientInfo.name, produto: item.name, data: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`, phone: clientInfo.phone });
+                        recompraList.push({ 
+                            nome: clientInfo.name, 
+                            produto: item.name, 
+                            data: d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }), 
+                            phone: clientInfo.phone 
+                        });
                     });
                 }
 

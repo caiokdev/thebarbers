@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+@theme {
+  --color-brand-red: var(--brand-red);
+  --color-brand-red-light: var(--brand-red-light);
+  --color-brand-red-border: var(--brand-red-border);
+  --color-brand-gold: var(--brand-gold);
+  --color-brand-gold-light: var(--brand-gold-light);
+  --color-brand-gold-border: var(--brand-gold-border);
+  --color-brand-black: var(--brand-black);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-card: var(--brand-card);
+  --color-brand-card-border: var(--brand-card-border);
+}
+
 /* ── The Barbers Brand Design System ── */
 :root {
     --brand-red: #dc2626;
@@ -33,8 +46,4 @@
     background: rgba(220, 38, 38, 0.5);
 }
 
-/* Brand switch toggle override */
-input[type="checkbox"]:checked~.peer-checked\:bg-emerald-500,
-.peer:checked~.peer-checked\:bg-emerald-500 {
-    background-color: var(--brand-red) !important;
-}
+/* Brand switch toggle override (Cleaned up) */

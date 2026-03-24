@@ -2,9 +2,12 @@ import React from 'react';
 
 export default function Header({ userName, totalClientes, totalAssinantes, hideSearch, hideNotifications, onSearchChange, searchQuery, title }) {
     const today = new Date();
-    const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-    const monthNames = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
-    const dateStr = `${dayNames[today.getDay()]}, ${today.getDate()} de ${monthNames[today.getMonth()]}`;
+    const dateStr = today.toLocaleDateString('pt-BR', { 
+        timeZone: 'America/Sao_Paulo', 
+        weekday: 'long', 
+        day: 'numeric', 
+        month: 'long' 
+    }).replace(/^\w/, (c) => c.toUpperCase()); // Capitalize first letter
 
     return (
         <header className="h-[72px] bg-slate-800 border-b border-slate-700 flex items-center justify-between px-8 flex-shrink-0">

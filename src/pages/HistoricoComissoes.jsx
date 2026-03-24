@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import Sidebar from '../components/Sidebar';
-import Header from '../components/Header';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 const _fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 function formatBRL(v) { return _fmtBRL.format(Number(v) || 0); }
@@ -17,7 +16,8 @@ function formatDate(iso) {
 }
 
 export default function HistoricoComissoes() {
-    const [barbershopId, setBarbershopId] = useState(null);
+    const { adminProfile, loading: globalLoading } = useGlobalData();
+    const barbershopId = adminProfile?.barbershopId;
     const [loading, setLoading] = useState(true);
     const [payments, setPayments] = useState([]);
     
@@ -27,14 +27,7 @@ export default function HistoricoComissoes() {
     const [selectedPro, setSelectedPro] = useState('all');
     const [prosList, setProsList] = useState([]);
 
-    useEffect(() => {
-        async function fetchShop() {
-            const { data: shop } = await supabase.from('barbershops').select('id').limit(1).single();
-            if (shop) setBarbershopId(shop.id);
-            else setLoading(false);
-        }
-        fetchShop();
-    }, []);
+    // Barbershop ID is now provided by GlobalDataContext
 
     useEffect(() => {
         if (!barbershopId) return;
@@ -140,10 +133,7 @@ export default function HistoricoComissoes() {
     const totalPago = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     return (
-        <div className="flex h-screen bg-slate-900 overflow-hidden font-sans">
-            <Sidebar />
-            <main className="flex-1 flex flex-col h-full overflow-hidden">
-                <Header title="Histórico de Comissões" userName="Administrador" hideSearch hideNotifications />
+        <main className="flex-1 flex flex-col h-full overflow-hidden">
 
                 <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
                     {/* Header + Filters */}
@@ -249,6 +239,5 @@ export default function HistoricoComissoes() {
                     </div>
                 </div>
             </main>
-        </div>
     );
 }
