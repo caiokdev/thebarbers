@@ -29,16 +29,17 @@ export function GlobalDataProvider({ children }) {
 
             const bId = shop.id;
 
-            // Fetch everything in parallel
+            // Fetch everything in parallel - removed .order('name') on tables without 'name' column
             const [adminRes, clientsRes, prosRes, servicesRes, productsRes, bhRes, plansRes] = await Promise.all([
-                supabase.from('profiles').select('name').eq('barbershop_id', bId).eq('role', 'admin').limit(1).single(),
-                supabase.from('clients').select('id, name, phone, is_subscriber, subscription_status').eq('barbershop_id', bId).order('name'),
-                supabase.from('professionals').select('id, name, specialty, commission_rate').eq('barbershop_id', bId).order('name'),
-                supabase.from('services').select('id, name, price').eq('barbershop_id', bId).order('name'),
-                supabase.from('products').select('id, name, price, current_stock').eq('barbershop_id', bId).order('name'),
-                supabase.from('business_hours').select('*').eq('barbershop_id', bId).order('day_of_week'),
-                supabase.from('plans').select('*').eq('barbershop_id', bId).order('name')
+                supabase.from('profiles').select('name').eq('barbershop_id', bId).eq('role', 'admin').limit(1).maybeSingle(),
+                supabase.from('clients').select('id, name, phone, is_subscriber, subscription_status').eq('barbershop_id', bId),
+                supabase.from('profiles').select('id, name, specialty, commission_rate').eq('barbershop_id', bId).eq('role', 'barber'),
+                supabase.from('services').select('id, name, price').eq('barbershop_id', bId),
+                supabase.from('products').select('id, name, price, current_stock').eq('barbershop_id', bId),
+                supabase.from('business_hours').select('*').eq('barbershop_id', bId),
+                supabase.from('plans').select('*').eq('barbershop_id', bId)
             ]);
+
 
             const adminName = adminRes.data?.name || 'Admin';
             const nameParts = adminName.split(' ');

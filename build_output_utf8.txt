@@ -1,0 +1,1 @@
+﻿error TS5083: Cannot read file 'C:/Users/CAIO/Desktop/Antigravityy/thebarbers/tsconfig.json'.

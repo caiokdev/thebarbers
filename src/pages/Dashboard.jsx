@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import Drawer from '../components/Drawer';
+import Drawer, { DrawerTable } from '../components/Drawer';
 import useDashboardData from '../hooks/useDashboardData';
 import { supabase } from '../supabaseClient';
 import OrderDetailsModal from '../components/OrderDetailsModal';
@@ -89,32 +89,7 @@ const AlertCard = ({ icon, label, count, onClick }) => (
     </div>
 );
 
-const DrawerTable = ({ columns, data, onRowClick }) => (
-    <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-            <thead>
-                <tr className="border-b border-slate-700">
-                    {columns.map((col, i) => (
-                        <th key={i} className="py-4 px-4 text-[11px] font-bold text-slate-500 uppercase tracking-widest">{col}</th>
-                    ))}
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-                {data.map((row, i) => (
-                    <tr 
-                        key={i} 
-                        onClick={() => onRowClick && onRowClick(row)}
-                        className={`hover:bg-slate-700/30 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
-                    >
-                        {Object.keys(row).filter(k => !k.startsWith('_')).map((key, j) => (
-                            <td key={j} className="py-4 px-4 text-sm text-slate-300 font-medium">{row[key]}</td>
-                        ))}
-                    </tr>
-                ))}
-            </tbody>
-        </table>
-    </div>
-);
+
 
 const ChartModal = ({ open, onClose, data, maxRevenue }) => {
     if (!open) return null;

@@ -20,31 +20,29 @@ export default function useDashboardData() {
     useEffect(() => {
         async function fetchAll() {
             try {
-                // --- Buscar barbershop_id ---
-                const { data: shop } = await supabase
-                    .from('barbershops')
-                    .select('id')
-                    .limit(1)
-                    .single();
-
-                if (!shop) {
-                    console.error('Nenhuma barbearia encontrada.');
+                // --- Passo 0: Obter sessão e perfil do usuário ---
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                    console.error('Nenhuma sessão ativa encontrada.');
                     setLoading(false);
                     return;
                 }
 
-                const bId = shop.id;
-
-                // --- PASSO 1: Admin profile ---
-                const { data: adminProfile } = await supabase
+                const { data: profile, error: profileErr } = await supabase
                     .from('profiles')
-                    .select('name')
-                    .eq('barbershop_id', bId)
-                    .eq('role', 'admin')
-                    .limit(1)
+                    .select('name, barbershop_id')
+                    .eq('id', session.user.id)
                     .single();
 
-                const adminName = adminProfile?.name || 'Admin';
+                if (profileErr || !profile) {
+                    console.error('Erro ao buscar perfil do usuário:', profileErr?.message);
+                    setLoading(false);
+                    return;
+                }
+
+                const bId = profile.barbershop_id;
+                const adminName = profile.name || 'Admin';
+
                 const nameParts = adminName.split(' ');
                 const adminInitials = nameParts.length >= 2
                     ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
@@ -81,13 +79,22 @@ export default function useDashboardData() {
                 in30Days.setDate(in30Days.getDate() + 30);
                 const in30DaysStr = getLocalDateISO(in30Days);
 
+                // Variáveis que faltavam
+                const todayISO = today.toISOString();
+                const in30DaysISO = in30Days.toISOString();
+
+
                 // Busca TODOS os agendamentos relevantes (este mês + próximos 30 dias para "Próximos")
-                const { data: rawOrdersData } = await supabase
+                const { data: rawOrdersData, error: ordersErr } = await supabase
                     .from('orders')
                     .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone)')
                     .eq('barbershop_id', bId)
                     .or(`scheduled_at.gte.${startOfMonthISO},created_at.gte.${startOfMonthISO}`)
                     .or(`scheduled_at.lte.${in30DaysStr},created_at.lte.${in30DaysStr}`);
+
+                if (ordersErr) {
+                    console.error("Erro ao buscar agendamentos:", ordersErr.message, ordersErr.details, ordersErr.hint);
+                }
 
                 // NOVO: Chama o RPC para pegar as métricas agregadas
                 const { data: summaryData, error: summaryErr } = await supabase.rpc('get_dashboard_summary', {
@@ -98,7 +105,9 @@ export default function useDashboardData() {
                     p_end_today: endOfDayISO,
                     p_date_today: todayStr
                 });
-                if (summaryErr) console.error("Erro no RPC dashboard:", summaryErr.message);
+                if (summaryErr) {
+                    console.error("Erro no RPC dashboard:", summaryErr.message, summaryErr.details, summaryErr.hint);
+                }
 
                 const allOrdersRaw = rawOrdersData || [];
 
@@ -287,7 +296,7 @@ export default function useDashboardData() {
                 for (let i = 6; i >= 0; i--) {
                     const d = new Date(today);
                     d.setDate(d.getDate() - i);
-                    const dateKey = localDate(d);
+                    const dateKey = getLocalDateISO(d);
                     const val = last7DaysData[dateKey] || 0;
                     faturamento7Dias.push({
                         dateKey,

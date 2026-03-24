@@ -1,0 +1,3 @@
+﻿Relation 'profiles(name)':  Could not find the table 'public.orders' in the schema cache
+Relation 'profiles!professional_id(name)':  Could not find the table 'public.orders' in the schema cache
+Relation 'profiles!orders_professional_id_fkey(name)':  Could not find the table 'public.orders' in the schema cache
