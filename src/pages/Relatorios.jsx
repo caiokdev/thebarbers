@@ -411,6 +411,7 @@ export default function Relatorios() {
                     data: o.closed_at,
                     valor: parseFloat(o.total_amount || 0),
                     descricao: 'Comanda — ' + (clientMap[o.client_id] || 'Cliente avulso'),
+                    pagamento: payLabels[o.payment_method] || o.payment_method || 'Outro',
                 }));
                 const saidas = monthExpenses.map(e => ({
                     tipo: 'saida',
@@ -1012,6 +1013,7 @@ export default function Relatorios() {
                                                 <tr className="border-b border-slate-700">
                                                     <th className="text-left px-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Data / Hora</th>
                                                     <th className="text-left px-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Descrição</th>
+                                                    <th className="text-left px-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Forma Pagto</th>
                                                     <th className="text-left px-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Tipo</th>
                                                     <th className="text-right px-6 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Valor</th>
                                                 </tr>
@@ -1039,6 +1041,7 @@ export default function Relatorios() {
                                                                     {horaStr && <span className="text-slate-500 text-xs ml-2">{horaStr}</span>}
                                                                 </td>
                                                                 <td className="px-6 py-3 text-slate-300 max-w-[300px] truncate">{mov.descricao}</td>
+                                                                <td className="px-6 py-3 text-slate-400 text-xs">{mov.pagamento || '—'}</td>
                                                                 <td className="px-6 py-3">
                                                                     {mov.tipo === 'entrada' ? (
                                                                         <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-500/10 text-green-400 ring-1 ring-inset ring-green-500/20">

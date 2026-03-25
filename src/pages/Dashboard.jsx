@@ -91,16 +91,16 @@ const AlertCard = ({ icon, label, count, onClick }) => (
 
 
 
-const ChartModal = ({ open, onClose, data, maxRevenue }) => {
+const ChartModal = ({ open, onClose, data, maxRevenue, title }) => {
     if (!open) return null;
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
-            <div className="relative bg-slate-800 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-4xl p-8 animate-in fade-in zoom-in duration-300">
+            <div className="relative bg-slate-800 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-6xl p-8 animate-in fade-in zoom-in duration-300">
                 <div className="flex items-center justify-between mb-10">
                     <div>
-                        <h2 className="text-xl font-bold text-slate-100">Faturamento Detalhado</h2>
-                        <p className="text-sm text-slate-400">Visão dos últimos 7 dias</p>
+                        <h2 className="text-xl font-bold text-slate-100">{title || 'Faturamento Detalhado'}</h2>
+                        <p className="text-sm text-slate-400">Visão detalhada dos registros</p>
                     </div>
                     <button onClick={onClose} className="p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-slate-200 transition-colors">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -108,20 +108,20 @@ const ChartModal = ({ open, onClose, data, maxRevenue }) => {
                         </svg>
                     </button>
                 </div>
-                <div className="flex items-end justify-between gap-4 h-[300px]">
+                <div className="flex items-end justify-between gap-2 h-[300px] overflow-x-auto custom-scrollbar pb-4">
                     {data.map((d, i) => (
-                        <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-3">
-                            <span className="text-xs font-bold text-slate-200 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl">{formatBRL(d.value)}</span>
+                        <div key={i} className="flex-1 min-w-[40px] flex flex-col items-center justify-end h-full gap-3">
+                            <span className="text-[10px] font-bold text-slate-200 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700 shadow-xl whitespace-nowrap">{formatBRL(d.value)}</span>
                             <div 
-                                className="w-full max-w-[60px] rounded-t-xl transition-all duration-700 ease-out shadow-lg"
+                                className="w-full max-w-[40px] rounded-t-lg transition-all duration-700 ease-out shadow-lg"
                                 style={{ 
-                                    height: `${(d.value / maxRevenue) * 100}%`, 
-                                    minHeight: '12px',
+                                    height: `${Math.max((d.value / (maxRevenue || 1)) * 100, 2)}%`, 
+                                    minHeight: '8px',
                                     background: d.day === 'Hoje' ? 'linear-gradient(to top, #866d0b, #B59410)' : 'rgba(181,148,16,0.3)',
                                     boxShadow: d.day === 'Hoje' ? '0 0 30px rgba(181,148,16,0.2)' : 'none'
                                 }}
                             />
-                            <span className={`text-xs font-bold ${d.day === 'Hoje' ? 'text-amber-400' : 'text-slate-400'}`}>{d.day}</span>
+                            <span className={`text-[10px] font-bold whitespace-nowrap ${d.day === 'Hoje' ? 'text-amber-400' : 'text-slate-400'}`}>{d.day}</span>
                         </div>
                     ))}
                 </div>
@@ -141,9 +141,9 @@ export default function Dashboard() {
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [detailModal, setDetailModal] = useState({ open: false, title: '', items: [] });
 
-    // Funnel Data
-    const funnelTotal = data?.funnel?.totalCount || 0;
-    const funnelClosed = data?.funnel?.closedCount || 0;
+    // Funnel Data — hook exports data.funnel.total / data.funnel.closed
+    const funnelTotal = data?.funnel?.total || 0;
+    const funnelClosed = data?.funnel?.closed || 0;
     const conversao = funnelTotal > 0 ? ((funnelClosed / funnelTotal) * 100).toFixed(1) : 0;
 
     // Revenue Data & Meta
@@ -151,19 +151,21 @@ export default function Dashboard() {
     const metaMes = 15000; // Meta Estática
     const metaPercent = Math.min((faturamentoMes / metaMes) * 100, 100);
 
-    // Chart Data
+    // Chart Data — hook exports data.faturamento7Dias with {day, value}
     const last7Days = useMemo(() => {
-        if (!data?.kpis?.faturamentoUltimos7Dias) return [];
-        return data.kpis.faturamentoUltimos7Dias.map(d => ({
-            day: d.dia === new Date().toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '') ? 'Hoje' : d.dia,
-            value: d.valor
-        }));
+        if (!data?.faturamento7Dias) return [];
+        return data.faturamento7Dias;
     }, [data]);
 
     const maxRevenue = useMemo(() => {
         const values = last7Days.map(d => d.value);
         return values.length > 0 ? Math.max(...values, 100) : 1000;
     }, [last7Days]);
+
+    const maxMonthlyRevenue = useMemo(() => {
+        const values = (data?.faturamentoMensal || []).map(d => d.value);
+        return values.length > 0 ? Math.max(...values, 100) : 1000;
+    }, [data]);
 
     // Handle Actions
     const handleDeleteOrder = async (orderId) => {
@@ -222,9 +224,9 @@ export default function Dashboard() {
                     data: (data.ordersOpen || []).map(o => ({
                         horario: o.hora,
                         cliente: o.cliente,
-                        pro: o.profissional,
-                        total: formatBRL(o.total),
-                        _id: o.id
+                        pro: o.barbeiro,
+                        total: o.valor,
+                        _id: o._id
                     }))
                 };
             case 'atendimentosHoje':
@@ -234,29 +236,28 @@ export default function Dashboard() {
                     data: (data.ordersToday || []).map(o => ({
                         horario: o.hora,
                         cliente: o.cliente,
-                        pro: o.profissional,
-                        status: o.statusLabel
+                        pro: o.barbeiro,
+                        status: o.statusLabel || 'Fechado'
                     }))
                 };
             case 'faturamentoHoje':
                 return {
                     title: 'Faturamento de Hoje',
-                    columns: ['Horário', 'Cliente', 'Total', 'Pagamento'],
+                    columns: ['Horário', 'Cliente', 'Total'],
                     data: (data.ordersTodayClosed || []).map(o => ({
                         horario: o.hora,
                         cliente: o.cliente,
-                        total: formatBRL(o.total),
-                        pagamento: o.origin === 'app' ? 'App' : 'Presencial'
+                        total: o.valor
                     }))
                 };
             case 'estoque':
                 return {
                     title: 'Estoque Crítico',
-                    columns: ['Produto', 'Atual', 'Preço'],
+                    columns: ['Produto', 'Atual', 'Mínimo'],
                     data: (data.estoqueData || []).map(p => ({
-                        nome: p.name,
-                        stock: p.current_stock,
-                        preco: formatBRL(p.price)
+                        nome: p.produto,
+                        stock: p.atual,
+                        preco: `mín: ${p.min}`
                     }))
                 };
             case 'pagamentos':
@@ -266,6 +267,16 @@ export default function Dashboard() {
                     data: (data.clientesInadimplentes || []).map(c => ({
                         nome: c.name,
                         phone: c.phone
+                    }))
+                };
+            case 'contratos':
+                return {
+                    title: 'Contratos Vencendo (7 dias)',
+                    columns: ['Cliente', 'Plano', 'Vencimento'],
+                    data: (data.contratosVencendo || []).map(s => ({
+                        cliente: s.nome,
+                        plano: s.plano,
+                        vence: s.vence
                     }))
                 };
             default:
@@ -403,7 +414,7 @@ export default function Dashboard() {
                     <MiniCard
                         icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                         label="Próximo horário livre"
-                        value="11:00"
+                        value={data.proximoHorarioLivre || '—'}
                         color="amber"
                     />
                     <MiniCard
@@ -503,7 +514,13 @@ export default function Dashboard() {
                 />
             </Drawer>
 
-            <ChartModal open={isChartModalOpen} onClose={() => setIsChartModalOpen(false)} data={last7Days} maxRevenue={maxRevenue} />
+            <ChartModal 
+                open={isChartModalOpen} 
+                onClose={() => setIsChartModalOpen(false)} 
+                data={data?.faturamentoMensal || last7Days} 
+                maxRevenue={maxMonthlyRevenue} 
+                title={data?.faturamentoMensal ? "Faturamento Mensal" : "Faturamento — 7 dias"}
+            />
 
             {detailModal.open && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center">

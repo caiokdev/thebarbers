@@ -10,6 +10,9 @@ export default function useDashboardData() {
     const [refetchKey, setRefetchKey] = useState(0);
     const location = useLocation();
 
+    // Bug 2 fix: expose refresh so Dashboard.jsx can trigger re-fetch
+    const refresh = useCallback(() => setRefetchKey(k => k + 1), []);
+
     // Re-fetch when window regains focus
     useEffect(() => {
         function handleFocus() { setRefetchKey(k => k + 1); }
@@ -40,8 +43,50 @@ export default function useDashboardData() {
                     return;
                 }
 
-                const bId = profile.barbershop_id;
+                let bId = profile.barbershop_id;
                 const adminName = profile.name || 'Admin';
+
+                // Fallback: se barbershop_id é o null UUID ou está faltando
+                const NULL_UUID = '00000000-0000-0000-0000-000000000000';
+                if (!bId || bId === NULL_UUID) {
+                    console.warn('[Dashboard] barbershop_id inválido no perfil, buscando via outras fontes...');
+                    // Tenta 1: buscar via tabela barber_shops (caso exista)
+                    const { data: bsRow } = await supabase
+                        .from('barber_shops')
+                        .select('id')
+                        .eq('owner_id', session.user.id)
+                        .maybeSingle();
+                    if (bsRow?.id) {
+                        bId = bsRow.id;
+                    } else {
+                        // Tenta 2: buscar via tabela clients (qualquer cliente pertencente ao user)
+                        const { data: anyClient } = await supabase
+                            .from('clients')
+                            .select('barbershop_id')
+                            .not('barbershop_id', 'is', null)
+                            .limit(1)
+                            .single();
+                        if (anyClient?.barbershop_id && anyClient.barbershop_id !== NULL_UUID) {
+                            bId = anyClient.barbershop_id;
+                        } else {
+                            // Tenta 3: buscar via tabela orders mais recente (as an admin they own the shop)
+                            const { data: anyOrder } = await supabase
+                                .from('orders')
+                                .select('barbershop_id')
+                                .not('barbershop_id', 'is', null)
+                                .limit(1)
+                                .single();
+                            if (anyOrder?.barbershop_id && anyOrder.barbershop_id !== NULL_UUID) {
+                                bId = anyOrder.barbershop_id;
+                            } else {
+                                console.error('[Dashboard] Não foi possível determinar o barbershop_id do admin.');
+                                setLoading(false);
+                                return;
+                            }
+                        }
+                    }
+                    console.log('[Dashboard] barbershop_id resolvido via fallback:', bId);
+                }
 
                 const nameParts = adminName.split(' ');
                 const adminInitials = nameParts.length >= 2
@@ -79,22 +124,44 @@ export default function useDashboardData() {
                 in30Days.setDate(in30Days.getDate() + 30);
                 const in30DaysStr = getLocalDateISO(in30Days);
 
+                const in7Days = new Date(today);
+                in7Days.setDate(in7Days.getDate() + 7);
+                const in7DaysStr = getLocalDateISO(in7Days);
+
                 // Variáveis que faltavam
                 const todayISO = today.toISOString();
                 const in30DaysISO = in30Days.toISOString();
+                const in7DaysISO = new Date(`${in7DaysStr}T23:59:59.999`).toISOString();
 
 
-                // Busca TODOS os agendamentos relevantes (este mês + próximos 30 dias para "Próximos")
+                // Busca TODOS os agendamentos relevantes: este mês OU fechados hoje
+                // NOTA: dois .or() encadeados criam um AND incorreto — usar um único .or() com todas as condições
                 const { data: rawOrdersData, error: ordersErr } = await supabase
                     .from('orders')
                     .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone)')
                     .eq('barbershop_id', bId)
-                    .or(`scheduled_at.gte.${startOfMonthISO},created_at.gte.${startOfMonthISO}`)
-                    .or(`scheduled_at.lte.${in30DaysStr},created_at.lte.${in30DaysStr}`);
+                    .or(
+                        `scheduled_at.gte.${startOfMonthISO},` +
+                        `created_at.gte.${startOfMonthISO},` +
+                        `closed_at.gte.${startOfDayISO}`
+                    );
 
                 if (ordersErr) {
                     console.error("Erro ao buscar agendamentos:", ordersErr.message, ordersErr.details, ordersErr.hint);
                 }
+
+                // Agendamentos futuros — incluí os de hoje ainda não iniciados e os dos próximos 30 dias
+                // NOTA: usar startOfDayISO (não todayISO) para capturar todos os agendamentos de hoje,
+                // mesmo aqueles que já começaram (ex: 09:00 quando são 10:30)
+                const { data: futureOrdersData } = await supabase
+                    .from('orders')
+                    .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone)')
+                    .eq('barbershop_id', bId)
+                    .in('status', ['scheduled', 'open'])
+                    .gte('scheduled_at', startOfDayISO)
+                    .lte('scheduled_at', in30DaysISO)
+                    .order('scheduled_at', { ascending: true });
+
 
                 // NOVO: Chama o RPC para pegar as métricas agregadas
                 const { data: summaryData, error: summaryErr } = await supabase.rpc('get_dashboard_summary', {
@@ -113,7 +180,9 @@ export default function useDashboardData() {
 
                 // Usando os dados agregados do RPC para performance
                 let openOrdersCount = summaryData?.funnel?.open || 0;
-                let faturamentoDia = summaryData?.financial?.faturamentoDia || 0;
+                // Bug 4 fix: usar RPC se > 0, senão fazer fallback após construir detalheFaturamentoHoje
+                const faturamentoDiaRPC = summaryData?.financial?.faturamentoDia || 0;
+                let faturamentoDia = faturamentoDiaRPC; // será ajustado abaixo se necessário
                 let faturamentoMes = summaryData?.financial?.faturamentoMes || 0;
                 let atendimentosHojeClosed = summaryData?.today?.closedHoje || 0;
                 let atendimentosHojeTotal = summaryData?.today?.totalHoje || 0;
@@ -201,25 +270,7 @@ export default function useDashboardData() {
                         if (status === 'canceled') canceledOrdersToday.push(o);
                     }
 
-                    // 6. Próximos Atendimentos (Qualquer agendamento futuro a partir de agora)
-                    if (status === 'scheduled' && o.scheduled_at) {
-                        const schedTime = new Date(o.scheduled_at).getTime();
-                        if (schedTime > nowMs) {
-                            const d2 = new Date(o.scheduled_at);
-                            const bName = o.professionals?.name || 'Sem Nome';
-                            const initials = bName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
-                            proximosAtendimentos.push({
-                                _id: o.id,
-                                orderInfo: { ...o, client_name: o.clients?.name, professional_name: bName },
-                                nome: bName,
-                                initials,
-                                cliente: o.clients?.name || 'Avulso',
-                                hora: formatTime(o.scheduled_at),
-                                data: formatDate(o.scheduled_at).substring(0, 5), // 'DD/MM'
-                                scheduled_at: o.scheduled_at // sort key
-                            });
-                        }
-                    }
+                    // (Próximos Atendimentos é construído abaixo com futureOrdersData)
 
                     // MODALS DE ATENDIMENTOS E FATURAMENTO (Baseado no Fechamento Real)
                     if (status === 'closed' && (isClosedToday || isScheduledToday)) {
@@ -245,7 +296,37 @@ export default function useDashboardData() {
                 detalheAtendimentosHoje.sort((a, b) => a.hora.localeCompare(b.hora));
                 detalheComandasAbertas.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                 detalheConversaoMes.sort((a, b) => new Date(b._created_at) - new Date(a._created_at));
+
+                // Próximos Atendimentos — construído com a query dedicada (futureOrdersData)
+                (futureOrdersData || []).forEach(o => {
+                    const bName = o.professionals?.name || 'Sem Nome';
+                    const initials = bName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+                    proximosAtendimentos.push({
+                        _id: o.id,
+                        orderInfo: { ...o, client_name: o.clients?.name, professional_name: bName },
+                        nome: bName,
+                        initials,
+                        cliente: o.clients?.name || 'Avulso',
+                        hora: formatTime(o.scheduled_at),
+                        data: formatDate(o.scheduled_at).substring(0, 5),
+                        scheduled_at: o.scheduled_at
+                    });
+                });
                 proximosAtendimentos.sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+
+                // Bug 4 fix: fallback para faturamentoDia se RPC retornou 0
+                // Soma diretamente do raw (total_amount), sem parsing de string formatada
+                if (faturamentoDiaRPC === 0) {
+                    faturamentoDia = allOrdersRaw
+                        .filter(o => o.status === 'closed' && o.closed_at && getLocalDateISO(new Date(o.closed_at)) === todayStr)
+                        .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+                    // Se ainda 0, tenta usando scheduled_at (para orders sem closed_at)
+                    if (faturamentoDia === 0) {
+                        faturamentoDia = allOrdersRaw
+                            .filter(o => o.status === 'closed' && getLocalDateISO(new Date(o.scheduled_at || o.created_at)) === todayStr)
+                            .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+                    }
+                }
 
                 // Meta Mensal Map
                 const detalheMetaMes = Object.entries(dailyMetaMap).map(([dayKey, total]) => {
@@ -315,11 +396,13 @@ export default function useDashboardData() {
                 const mrr = (activePlans || []).reduce((sum, s) => sum + parseFloat(s.price || 0), 0);
                 const activeSubsCount = (activePlans || []).length;
 
-                // Contratos
-                const [{ count: expiringContracts }, { count: pendingContracts }] = await Promise.all([
-                    supabase.from('subscriptions').select('*', { count: 'exact', head: true }).eq('barbershop_id', bId).eq('status', 'active').gte('next_billing_date', todayISO).lte('next_billing_date', in30DaysISO),
+                // Contratos (Bug fix: usar client_subscriptions [singular] e field valid_until)
+                const [{ data: expiringContractsData }, { count: pendingContracts }] = await Promise.all([
+                    supabase.from('client_subscriptions').select('*, clients!inner(barbershop_id)').eq('clients.barbershop_id', bId).eq('status', 'active').gte('valid_until', startOfDayISO).lte('valid_until', in7DaysISO),
                     supabase.from('subscriptions').select('*', { count: 'exact', head: true }).eq('barbershop_id', bId).eq('status', 'pending'),
                 ]);
+                const expiringContractsCount = (expiringContractsData || []).length;
+                
 
                 // RANKING DE BARBEIROS (APENAS ESTE MÊS PARA PERFORMANCE)
                 const { data: closedBarberOrders } = await supabase.from('orders').select('id, professional_id, total_amount').eq('barbershop_id', bId).eq('status', 'closed').gte('scheduled_at', startOfMonthISO).lte('scheduled_at', endOfMonthISO);
@@ -537,18 +620,57 @@ export default function useDashboardData() {
                 clientesEvasao.sort((a, b) => b.diasUltimaVisita - a.diasUltimaVisita);
 
                 // Clientes Inadimplentes
+                // Bug 3 fix: chaves alinhadas com o que o Drawer em Dashboard.jsx espera (name, phone)
                 const { data: inadimplentesData } = await supabase.from('clients').select('*').eq('barbershop_id', bId).eq('is_subscriber', true).eq('subscription_status', 'overdue');
-                const clientesInadimplentes = (inadimplentesData || []).map(c => ({ nome: c.name || 'Sem nome', telefone: c.phone || '—', status: 'Atrasado' }));
+                const clientesInadimplentes = (inadimplentesData || []).map(c => ({ name: c.name || 'Sem nome', phone: c.phone || '—', status: 'Atrasado' }));
 
-                // Contratos a vencer
-                const { data: contratosVencendoData } = await supabase.from('subscriptions').select('client_id, plan_name, next_billing_date').eq('barbershop_id', bId).eq('status', 'active').gte('next_billing_date', todayISO).lte('next_billing_date', in30DaysISO);
-                const cvClientIds = [...new Set((contratosVencendoData || []).map(s => s.client_id).filter(Boolean))];
-                let cvClientNames = {};
-                if (cvClientIds.length > 0) {
-                    const { data: cvClients } = await supabase.from('clients').select('id, name').in('id', cvClientIds);
-                    (cvClients || []).forEach(c => { cvClientNames[c.id] = c.name; });
+                // Contratos a vencer (lista detalhada) - Bug fix: usar client_subscriptions e join
+                // Usando startOfDayISO e in7DaysISO para bater com a contagem do KPI
+                const { data: cvData } = await supabase.from('client_subscriptions')
+                    .select('valid_until, plans(name), clients!inner(name, barbershop_id)')
+                    .eq('clients.barbershop_id', bId)
+                    .eq('status', 'active')
+                    .gte('valid_until', startOfDayISO)
+                    .lte('valid_until', in7DaysISO);
+
+                const contratosVencendo = (cvData || []).map(s => ({
+                    nome: s.clients?.name || 'Cliente',
+                    plano: s.plans?.name || 'Assinatura',
+                    vence: s.valid_until ? new Date(s.valid_until).toLocaleDateString('pt-BR') : '—'
+                }));
+
+                // --- 6. Próximo Horário Livre ---
+                const takenSlots = allOrdersRaw
+                    .filter(o => o.scheduled_at && getLocalDateISO(o.scheduled_at) === todayStr && o.status !== 'canceled' && o.status !== 'no_show')
+                    .map(o => formatTime(o.scheduled_at));
+
+                let proximoHorarioLivre = '—';
+                const now = new Date();
+                // Define slots: 08:00 to 20:00 every 30 mins
+                for (let h = 8; h <= 20; h++) {
+                    for (let m of [0, 30]) {
+                        if (h === 20 && m === 30) break;
+                        const slotDate = new Date(today);
+                        slotDate.setHours(h, m, 0, 0);
+                        const timeStr = formatTime(slotDate);
+                        
+                        if (slotDate > now && !takenSlots.includes(timeStr)) {
+                            proximoHorarioLivre = timeStr;
+                            h = 21; // break outer
+                            break;
+                        }
+                    }
                 }
-                const contratosVencendo = (contratosVencendoData || []).map(s => ({ nome: cvClientNames[s.client_id] || 'Sem nome', plano: s.plan_name, vence: s.next_billing_date ? new Date(s.next_billing_date).toLocaleDateString('pt-BR') : '—' }));
+
+                // Faturamento Mensal breakdown
+                const faturamentoMensal = Object.entries(dailyMetaMap).map(([dayKey, total]) => ({
+                    day: formatDate(dayKey).substring(0, 5), // DD/MM
+                    value: Math.round(total * 100) / 100
+                })).sort((a, b) => {
+                    const [da, ma] = a.day.split('/').map(Number);
+                    const [db, mb] = b.day.split('/').map(Number);
+                    return ma !== mb ? ma - mb : da - db;
+                });
 
                 setData({
                     adminName,
@@ -563,11 +685,16 @@ export default function useDashboardData() {
                         ticketMedio, 
                         activeSubsCount, 
                         mrr, 
-                        atendimentosHojeClosed: detalheAtendimentosHoje.length, 
-                        atendimentosHojeTotal: allOrdersRaw.filter(o => o.scheduled_at && new Date(o.scheduled_at).toLocaleDateString('pt-BR') === today.toLocaleDateString('pt-BR')).length 
+                        atendimentosHojeClosed: detalheAtendimentosHoje.length,
+                        // Bug 5 fix: unificar fonte — usar getLocalDateISO (timezone-correct) em vez de toLocaleDateString
+                        atendimentosHojeTotal: allOrdersRaw.filter(o => o.scheduled_at && getLocalDateISO(new Date(o.scheduled_at)) === todayStr).length
                     },
+                    // Bug 1 fix: expor com as chaves que Dashboard.jsx espera
+                    ordersToday: detalheAtendimentosHoje,
+                    ordersTodayClosed: detalheFaturamentoHoje,
+                    ordersOpen: detalheComandasAbertas,
                     origins: { total: ordersTotal || 0, app: ordersApp || 0, appPercent, reception: ordersReception || 0, receptionPercent, whatsapp: ordersWhatsapp || 0, whatsappPercent },
-                    contracts: { expiring: expiringContracts || 0, pending: pendingContracts || 0 },
+                    contracts: { expiring: expiringContractsCount || 0, pending: pendingContracts || 0 },
                     funnel,
                     clientesEvasao,
                     rankingBarbeiros,
@@ -582,6 +709,8 @@ export default function useDashboardData() {
                     proximosAtendimentos,
                     contratosVencendo,
                     faturamento7Dias,
+                    faturamentoMensal,
+                    proximoHorarioLivre,
                     detalheFaturamentoHoje,
                     detalheAtendimentosHoje,
                     detalheComandasAbertas,
@@ -598,5 +727,6 @@ export default function useDashboardData() {
         fetchAll();
     }, [location.pathname, refetchKey]);
 
-    return { loading, data };
+    // Bug 2 fix: export refresh so Dashboard.jsx can trigger manual re-fetch
+    return { loading, data, refresh };
 }

@@ -16,9 +16,10 @@ export default function Layout() {
                     userName={adminProfile?.name} 
                     totalClientes={stats?.clientsCount} 
                     totalAssinantes={stats?.activeSubsCount} 
-                    hideSearch={false} 
-                    hideNotifications={false} 
+                    hideSearch={true} 
+                    hideNotifications={true} 
                 />
+
 
                 <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
                     {loading && (
