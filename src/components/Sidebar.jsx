@@ -92,6 +92,7 @@ export default function Sidebar() {
     const [shopLogo, setShopLogo] = useState(localStorage.getItem('shop_logo') || '/logo.png');
 
     // Admin profile state
+    const [shopId, setShopId] = useState(null);
     const [adminName, setAdminName] = useState('');
     const [adminInitials, setAdminInitials] = useState('');
     const [adminId, setAdminId] = useState(null);
@@ -103,6 +104,7 @@ export default function Sidebar() {
     const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
     const [passwordInput, setPasswordInput] = useState('');
     const [isPasswordError, setIsPasswordError] = useState(false);
+    const [checkingPassword, setCheckingPassword] = useState(false);
 
     // Edit form state
     const [editForm, setEditForm] = useState({ name: '', phone: '', photo: '', password: '' });
@@ -119,6 +121,7 @@ export default function Sidebar() {
                     .single();
 
                 if (shop) {
+                    setShopId(shop.id);
                     if (shop.name) {
                         const parts = shop.name.trim().split(' ');
                         const shortName = parts.length > 1
@@ -161,24 +164,46 @@ export default function Sidebar() {
     }, []);
 
     const handleProfileClick = () => {
-        setPasswordInput('');
-        setIsPasswordError(false);
-        setIsPasswordModalOpen(true);
+        setEditForm(prev => ({
+            ...prev,
+            phone: localStorage.getItem('admin_phone') || '',
+            photo: localStorage.getItem('admin_photo') || '',
+            password: '' 
+        }));
+        setIsProfileModalOpen(true);
     };
 
-    const handleUnlock = () => {
-        const masterPassword = localStorage.getItem('admin_password') || 'admin123';
-        if (passwordInput === masterPassword) {
-            setIsPasswordModalOpen(false);
-            setEditForm(prev => ({
-                ...prev,
-                phone: localStorage.getItem('admin_phone') || '',
-                photo: localStorage.getItem('admin_photo') || '',
-                password: masterPassword
-            }));
-            setIsProfileModalOpen(true);
-        } else {
+    const handleUnlock = async () => {
+        if (!passwordInput || !shopId) {
             setIsPasswordError(true);
+            return;
+        }
+        setCheckingPassword(true);
+        try {
+            const { data: isValid, error } = await supabase.rpc('verify_master_password', {
+                p_barbershop_id: shopId,
+                p_password: passwordInput
+            });
+            
+            if (error) throw error;
+            
+            if (isValid) {
+                setIsPasswordModalOpen(false);
+                setEditForm(prev => ({
+                    ...prev,
+                    phone: localStorage.getItem('admin_phone') || '',
+                    photo: localStorage.getItem('admin_photo') || '',
+                    password: '' // empty so we don't expose current hash/password
+                }));
+                setIsProfileModalOpen(true);
+            } else {
+                setIsPasswordError(true);
+            }
+        } catch (err) {
+            console.error('Erro ao verificar senha master:', err);
+            setIsPasswordError(true);
+        } finally {
+            setCheckingPassword(false);
         }
     };
 
@@ -201,11 +226,17 @@ export default function Sidebar() {
                 const { error } = await supabase.from('profiles').update({ name: editForm.name }).eq('id', adminId);
                 if (error) throw error;
             }
-            // Save locals
+            // Save locals for device-specific preferences
             localStorage.setItem('admin_phone', editForm.phone);
             localStorage.setItem('admin_photo', editForm.photo);
+            localStorage.removeItem('admin_password'); // limpa legados inseguros
+
             if (editForm.password && editForm.password.trim() !== '') {
-                localStorage.setItem('admin_password', editForm.password);
+                const { error: rpcError } = await supabase.rpc('set_master_password', {
+                    p_barbershop_id: shopId,
+                    p_password: editForm.password.trim()
+                });
+                if (rpcError) throw rpcError;
             }
 
             // Sync local states
@@ -327,8 +358,8 @@ export default function Sidebar() {
                                 <button onClick={() => setIsPasswordModalOpen(false)} className="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold transition-colors">
                                     Cancelar
                                 </button>
-                                <button onClick={handleUnlock} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors shadow-lg shadow-red-600/20">
-                                    Entrar
+                                <button onClick={handleUnlock} disabled={checkingPassword} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center">
+                                    {checkingPassword ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Entrar'}
                                 </button>
                             </div>
                         </div>

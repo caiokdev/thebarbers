@@ -308,8 +308,6 @@ export default function Dashboard() {
                     icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                     value={formatBRL(data.kpis.faturamentoDia)}
                     label="Faturamento Hoje"
-                    badge="+12% vs ontem"
-                    badgeColor="amber"
                     onClick={() => openDrawer('faturamentoHoje')}
                 />
                 <KpiCard
@@ -466,16 +464,12 @@ export default function Dashboard() {
                 <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6 flex flex-col justify-between">
                     <div>
                         <h2 className="text-base font-semibold text-slate-100">Ticket Médio</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Média por comanda fechada</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Média por comanda fechada do mês</p>
                     </div>
                     <div className="my-6">
                         <p className="text-5xl font-bold text-slate-100 tracking-tight">{formatBRL(data.kpis.ticketMedio)}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-red-500/10 text-red-400">
-                            -5% vs mês anterior
-                        </span>
-                        <span className="text-xs text-slate-500">Simulado</span>
                     </div>
                 </div>
             </section>

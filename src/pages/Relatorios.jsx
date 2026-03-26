@@ -15,9 +15,7 @@ import { useGlobalData } from '../context/GlobalDataContext';
 
 const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const COLORS = ['#34d399', '#60a5fa', '#a78bfa', '#fbbf24', '#f87171', '#38bdf8', '#c084fc', '#fb923c'];
-const MRR_FALLBACK_VALUE = 80; // valor padrão da assinatura
 
-const formatBRL = (v) => formatCurrency(v);
 
 const TABS = [
     { key: 'visao_geral', label: 'Visão Geral', icon: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z' },
@@ -73,7 +71,7 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
                                 <td className="px-3 py-2.5 text-slate-300">{dataStr}</td>
                                 <td className="px-3 py-2.5 text-slate-300">{o.clienteNome || clientMap[o.client_id] || 'Cliente avulso'}</td>
                                 {showBarbeiro && <td className="px-3 py-2.5 text-slate-300">{proMap[o.professional_id] || 'Sem nome'}</td>}
-                                <td className="px-3 py-2.5 text-right font-semibold text-red-500">{formatBRL(parseFloat(o.total_amount || 0))}</td>
+                                <td className="px-3 py-2.5 text-right font-semibold text-red-500">{formatCurrency(parseFloat(o.total_amount || 0))}</td>
                             </tr>
                             {isExpanded && (
                                 <tr>
@@ -87,7 +85,7 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
                                                             {items.filter(it => it.item_type === 'service').map((it, j) => (
                                                                 <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                     <span>{it.quantity}x {it.name}</span>
-                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                    <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -98,7 +96,7 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
                                                             {items.filter(it => it.item_type === 'product').map((it, j) => (
                                                                 <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                     <span>{it.quantity}x {it.name}</span>
-                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                    <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -108,7 +106,7 @@ function OrdersAccordion({ data, clientMap, proMap, showBarbeiro }) {
                                                             {items.filter(it => it.item_type !== 'service' && it.item_type !== 'product').map((it, j) => (
                                                                 <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                     <span>{it.quantity}x {it.name}</span>
-                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                    <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -238,13 +236,37 @@ export default function Relatorios() {
                 const allExpenses = expenses || [];
 
                 // 4. Active subscribers for MRR
-                const { data: activeSubs } = await supabase
+                const { data: activeSubsData } = await supabase
                     .from('clients')
-                    .select('id')
+                    .select(`
+                        id,
+                        client_subscriptions (
+                            status,
+                            plans (
+                                price
+                            )
+                        )
+                    `)
                     .eq('barbershop_id', barbershopId)
                     .eq('is_subscriber', true)
                     .eq('subscription_status', 'active');
-                const activeSubsCount = (activeSubs || []).length;
+                
+                let mrrCalc = 0;
+                let activeSubsCount = 0;
+
+                if (activeSubsData) {
+                    activeSubsCount = activeSubsData.length;
+                    activeSubsData.forEach(client => {
+                        const subs = client.client_subscriptions;
+                        if (subs && Array.isArray(subs)) {
+                            // Find the active subscription and add its price
+                            const activeSub = subs.find(s => s.status === 'active');
+                            if (activeSub && activeSub.plans && activeSub.plans.price) {
+                                mrrCalc += parseFloat(activeSub.plans.price);
+                            }
+                        }
+                    });
+                }
 
                 // ═══ Filter orders for current month ═══
                 const currentMonthOrders = allOrders.filter(o => {
@@ -321,7 +343,7 @@ export default function Relatorios() {
                 });
 
                 // ═══ KPI: MRR ═══
-                const mrr = activeSubsCount * MRR_FALLBACK_VALUE;
+                const mrr = mrrCalc;
 
                 setKpis({
                     faturamentoMes,
@@ -357,8 +379,12 @@ export default function Relatorios() {
                 const proIds = [...new Set(currentMonthOrders.map(o => o.professional_id).filter(Boolean))];
                 let proMap = {};
                 if (proIds.length > 0) {
-                    const { data: pros } = await supabase.from('professionals').select('id, name').in('id', proIds);
-                    (pros || []).forEach(p => { proMap[p.id] = p.name; });
+                    const [prosRes, profilesProsRes] = await Promise.all([
+                        supabase.from('professionals').select('id, name').in('id', proIds),
+                        supabase.from('profiles').select('id, name').in('id', proIds)
+                    ]);
+                    const allPros = [...(prosRes.data || []), ...(profilesProsRes.data || [])];
+                    allPros.forEach(p => { proMap[p.id] = p.name; });
                 }
 
                 const grouped = {};
@@ -463,7 +489,7 @@ export default function Relatorios() {
                     <p className="text-xs font-semibold text-slate-300 mb-1">{label}</p>
                     {payload.map((p, i) => (
                         <p key={i} className="text-xs" style={{ color: p.color }}>
-                            {p.name === 'entradas' ? '↑ Entradas' : p.name === 'saidas' ? '↓ Saídas' : p.name}: {formatBRL(p.value)}
+                            {p.name === 'entradas' ? '↑ Entradas' : p.name === 'saidas' ? '↓ Saídas' : p.name}: {formatCurrency(p.value)}
                         </p>
                     ))}
                 </div>
@@ -543,7 +569,7 @@ export default function Relatorios() {
                                     onClick={() => setDetailsModal({ open: true, type: 'orders', title: `Faturamento — ${periodLabel}`, data: ordersDoMes })}
                                 >
                                     <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Faturamento — {periodLabel}</p>
-                                    <p className={`text-2xl font-bold ${theme.text} mt-1`}>{formatBRL(kpis.faturamentoMes)}</p>
+                                    <p className={`text-2xl font-bold ${theme.text} mt-1`}>{formatCurrency(kpis.faturamentoMes)}</p>
                                     {kpis.crescimentoMM !== null && (
                                         <div className="flex items-center gap-1.5 mt-2">
                                             {kpis.crescimentoMM >= 0 ? (
@@ -619,8 +645,8 @@ export default function Relatorios() {
                                             </div>
                                             <div>
                                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Receita Recorrente (MRR)</p>
-                                                <p className="text-3xl font-bold" style={{ color: '#B59410' }}>{formatBRL(kpis.mrr)}</p>
-                                                <p className="text-[10px] text-slate-600 mt-0.5">{kpis.activeSubsCount} assinantes ativos × {formatBRL(MRR_FALLBACK_VALUE)}</p>
+                                                <p className="text-3xl font-bold" style={{ color: '#B59410' }}>{formatCurrency(kpis.mrr)}</p>
+                                                <p className="text-[10px] text-slate-600 mt-0.5">{kpis.activeSubsCount} assinantes ativos (Ticket Médio: {kpis.activeSubsCount > 0 ? formatCurrency(kpis.mrr / kpis.activeSubsCount) : formatCurrency(0)})</p>
                                             </div>
                                         </div>
                                     </div>
@@ -695,7 +721,7 @@ export default function Relatorios() {
                                             </div>
                                             <div>
                                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Ticket Médio — {periodLabel}</p>
-                                                <p className="text-3xl font-bold text-blue-400">{formatBRL(kpis.ticketMedio)}</p>
+                                                <p className="text-3xl font-bold text-blue-400">{formatCurrency(kpis.ticketMedio)}</p>
                                                 <p className="text-[10px] text-slate-600 mt-0.5">Média por comanda fechada</p>
                                             </div>
                                         </div>
@@ -847,7 +873,7 @@ export default function Relatorios() {
                                                                 <span className="text-sm text-slate-300 font-medium">{b.nome}</span>
                                                                 <div className="flex items-center gap-3">
                                                                     <span className="text-[11px] text-slate-500">{b.qtd} atend.</span>
-                                                                    <span className={`text-sm font-bold ${theme.text}`}>{formatBRL(b.total)}</span>
+                                                                    <span className={`text-sm font-bold ${theme.text}`}>{formatCurrency(b.total)}</span>
                                                                 </div>
                                                             </div>
                                                             <div className="w-full bg-slate-900 rounded-full h-2.5">
@@ -953,7 +979,7 @@ export default function Relatorios() {
                                                         ))}
                                                     </Pie>
                                                     <Tooltip
-                                                        formatter={(value) => formatBRL(value)}
+                                                        formatter={(value) => formatCurrency(value)}
                                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', fontSize: '12px' }}
                                                         itemStyle={{ color: '#e2e8f0' }}
                                                     />
@@ -985,7 +1011,7 @@ export default function Relatorios() {
                                                                 <p className="text-sm font-medium text-slate-200">{pm.name}</p>
                                                                 <p className="text-[11px] text-slate-500">{pct}% do total</p>
                                                             </div>
-                                                            <span className="text-sm font-bold text-slate-200">{formatBRL(pm.value)}</span>
+                                                            <span className="text-sm font-bold text-slate-200">{formatCurrency(pm.value)}</span>
                                                         </div>
                                                     );
                                                 })}
@@ -1054,7 +1080,7 @@ export default function Relatorios() {
                                                                     )}
                                                                 </td>
                                                                 <td className={`px-6 py-3 text-right font-semibold ${mov.tipo === 'entrada' ? 'text-green-400' : 'text-rose-400'}`}>
-                                                                    {mov.tipo === 'entrada' ? '+' : '-'} {formatBRL(mov.valor)}
+                                                                    {mov.tipo === 'entrada' ? '+' : '-'} {formatCurrency(mov.valor)}
                                                                 </td>
                                                             </tr>
                                                         );

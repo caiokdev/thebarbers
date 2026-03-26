@@ -3,8 +3,8 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useTheme } from '../context/ThemeContext';
 import { useGlobalData } from '../context/GlobalDataContext';
+import { formatCurrency } from '../utils/orderUtils';
 
-const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const DEFAULT_PLANS = [
     { 
@@ -444,7 +444,7 @@ export default function Planos() {
                                 </div>
 
                                 <div className="flex items-end gap-2 mb-2">
-                                    <span className="text-3xl font-black text-white">{formatBRL(currentPrice)}</span>
+                                    <span className="text-3xl font-black text-white">{formatCurrency(currentPrice)}</span>
                                     <span className="text-sm text-slate-500 font-medium mb-1.5">/mês</span>
                                 </div>
                             </div>

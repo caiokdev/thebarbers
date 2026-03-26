@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { formatDate, formatTime, getLocalDateISO } from '../utils/dateUtils';
 import { formatCurrency } from '../utils/orderUtils';
+import { useGlobalData } from '../context/GlobalDataContext';
 
 /* ───────── Constants ───────── */
 const DAY_NAMES = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -40,12 +41,13 @@ function getInitials(name) {
 
 function generateTimeSlots(startHour, endHour, startMin = 0, endMin = 0) {
     const slots = [];
-    for (let h = startHour; h <= endHour; h++) {
-        const minStart = (h === startHour) ? startMin : 0;
-        const minEnd = (h === endHour) ? endMin : 59;
-        if (minStart <= 0 && minEnd >= 0) slots.push(`${String(h).padStart(2, '0')}:00`);
-        if (minStart <= 30 && minEnd >= 30 && h < endHour) slots.push(`${String(h).padStart(2, '0')}:30`);
-        if (h === endHour && minEnd >= 30) slots.push(`${String(h).padStart(2, '0')}:30`);
+    const startTotal = startHour * 60 + startMin;
+    const endTotal = endHour * 60 + endMin;
+    
+    for (let current = startTotal; current < endTotal; current += 30) {
+        const h = Math.floor(current / 60);
+        const m = current % 60;
+        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
     }
     return slots;
 }
@@ -64,13 +66,14 @@ const STATUS_CONFIG = {
    ═══════════════════════════════════════════════════════════════ */
 export default function Agenda() {
     const navigate = useNavigate();
+    const { adminProfile } = useGlobalData();
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [professionals, setProfessionals] = useState([]);
     const [clients, setClients] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [catalog, setCatalog] = useState([]);       // services + products combined
-    const [barbershopId, setBarbershopId] = useState(null);
-    const [noshowActive, setNoshowActive] = useState(false);
+    const barbershopId = adminProfile?.barbershopId;
+    const noshowActive = adminProfile?.noshowActive;
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -114,28 +117,27 @@ export default function Agenda() {
 
     // ── Fetch master data ──
     useEffect(() => {
+        if (!barbershopId) return;
+
         async function fetchData() {
             try {
-                const { data: shop } = await supabase
-                    .from('barbershops')
-                    .select('id, noshow_active')
-                    .limit(1)
-                    .single();
-
-                if (!shop) { setLoading(false); return; }
-                setBarbershopId(shop.id);
-                setNoshowActive(shop.noshow_active ?? false);
-
-                const [barbersRes, clientsRes, productsRes] = await Promise.all([
+                const [barbersRes, profileBarbersRes, clientsRes, productsRes] = await Promise.all([
                     supabase.from('professionals').select('id, name, specialty')
-                        .eq('barbershop_id', shop.id).order('name'),
+                        .eq('barbershop_id', barbershopId).order('name'),
+                    supabase.from('profiles').select('id, name, specialty')
+                        .eq('barbershop_id', barbershopId).eq('role', 'barber').order('name'),
                     supabase.from('clients').select('id, name, phone, is_subscriber, subscription_status')
-                        .eq('barbershop_id', shop.id).order('name'),
+                        .eq('barbershop_id', barbershopId).order('name'),
                     supabase.from('products').select('id, name, price, current_stock')
-                        .eq('barbershop_id', shop.id).order('name'),
+                        .eq('barbershop_id', barbershopId).order('name'),
                 ]);
 
-                setProfessionals(barbersRes.data || []);
+                const mergedProfessionals = [
+                    ...(barbersRes.data || []),
+                    ...(profileBarbersRes.data || [])
+                ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+
+                setProfessionals(mergedProfessionals);
                 setClients(clientsRes.data || []);
 
                 // Build a combined catalog
@@ -152,7 +154,7 @@ export default function Agenda() {
                     const { data: svcData } = await supabase
                         .from('services')
                         .select('id, name, price')
-                        .eq('barbershop_id', shop.id)
+                        .eq('barbershop_id', barbershopId)
                         .order('name');
                     serviceItems = (svcData || []).map(s => ({
                         id: s.id,
@@ -168,7 +170,7 @@ export default function Agenda() {
                     const { data: bhData } = await supabase
                         .from('business_hours')
                         .select('*')
-                        .eq('barbershop_id', shop.id)
+                        .eq('barbershop_id', barbershopId)
                         .order('day_of_week');
                     setBusinessHours(bhData || []);
                 } catch (_) {}
@@ -177,7 +179,7 @@ export default function Agenda() {
             }
         }
         fetchData();
-    }, []);
+    }, [barbershopId]);
 
     const fetchAppointments = useCallback(async () => {
         if (!barbershopId) return;
@@ -439,7 +441,7 @@ export default function Agenda() {
                 <AppointmentModal
                     professionals={professionals} clients={clients} catalog={catalog}
                     selectedDate={selectedDate} selectedSlot={selectedSlot}
-                    barbershopId={barbershopId} appointments={appointments}
+                    barbershopId={barbershopId} noshowActive={noshowActive} appointments={appointments}
                     saving={saving} setSaving={setSaving}
                     onClose={() => setIsModalOpen(false)}
                     onSaved={() => { setIsModalOpen(false); fetchAppointments(); }}
@@ -449,6 +451,7 @@ export default function Agenda() {
             {isDetailsModalOpen && selectedOrderDetails && (
                 <OrderDetailsModal
                     order={selectedOrderDetails} clientMap={clientMap} proMap={proMap}
+                    barbershopId={barbershopId} noshowActive={noshowActive}
                     onClose={() => { setIsDetailsModalOpen(false); setSelectedOrderDetails(null); }}
                     onDelete={async () => {
                         if (!['canceled', 'no_show'].includes(selectedOrderDetails.status)) await refundOrderServices(selectedOrderDetails.id, selectedOrderDetails.client_id);
@@ -476,8 +479,7 @@ export default function Agenda() {
                         const { error } = await supabase.from('orders').update({ status: 'no_show' }).eq('id', selectedOrderDetails.id);
                         if (error) { toast.error(`Erro ao marcar falta: ${error.message}`); return; }
                         try {
-                            const { data: shop } = await supabase.from('barbershops').select('noshow_active').eq('id', barbershopId).single();
-                            if (shop?.noshow_active) {
+                            if (noshowActive) {
                                 await fetch('https://caiokdev.app.n8n.cloud/webhook-test/naocompareceu', {
                                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ orderId: selectedOrderDetails.id, barbershopId, clientId: selectedOrderDetails.client_id, professionalId: selectedOrderDetails.professional_id, scheduledAt: selectedOrderDetails.scheduled_at })
@@ -504,7 +506,7 @@ export default function Agenda() {
    ═══════════════════════════════════════════════════════════════ */
 function AppointmentModal({
     professionals, clients, catalog, selectedDate, selectedSlot,
-    barbershopId, appointments, saving, setSaving, onClose, onSaved,
+    barbershopId, noshowActive, appointments, saving, setSaving, onClose, onSaved,
 }) {
     const [professionalId, setProfessionalId] = useState(selectedSlot.professionalId || '');
     const [date, setDate] = useState(formatDateInput(selectedDate));
@@ -743,7 +745,7 @@ function AppointmentModal({
     );
 }
 
-function OrderDetailsModal({ order, clientMap, proMap, onClose, onDelete, onCancel, onNoShow, onOpenComanda }) {
+function OrderDetailsModal({ order, clientMap, proMap, barbershopId, noshowActive, onClose, onDelete, onCancel, onNoShow, onOpenComanda }) {
     const dt = new Date(order.scheduled_at);
     const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
     const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;

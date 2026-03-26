@@ -2,16 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
-import useDashboardData from '../hooks/useDashboardData';
 import { useGlobalData } from '../context/GlobalDataContext';
-
-const DEFAULT_MESSAGES = {
-    reminder: "Olá {{cliente}}, seu horário com {{barbeiro}} está próximo! Falta cerca de 1 hora.",
-    feedback: "Olá {{cliente}}, o que achou do serviço? Avalie a gente!",
-    noshow: "Poxa {{cliente}}, sentimos sua falta hoje. Quer remarcar seu horário com {{barbeiro}}?",
-    rebook: "E aí {{cliente}}, curtiu o corte? Já quer deixar o próximo garantido?",
-    birthday: "Parabéns {{cliente}}! Feliz aniversário! Como presente, você tem um desconto especial na nossa barbearia hoje!",
-};
+import { getLocalDateISO } from '../utils/dateUtils';
+import { DEFAULT_MESSAGES } from '../utils/constants';
 
 export default function Automacoes() {
     const { theme } = useTheme();
@@ -35,8 +28,49 @@ export default function Automacoes() {
     const [saving, setSaving] = useState(false);
 
     // Dashboard data for birthdays
-    const { data: dashboardData } = useDashboardData();
+    const { clients } = useGlobalData();
     const [birthdayModal, setBirthdayModal] = useState({ open: false, title: '', items: [] });
+    
+    // Compute birthdays synchronously
+    const birthdayData = React.useMemo(() => {
+        const todayISO = getLocalDateISO(new Date());
+        const [tY, tM, tD] = todayISO.split('-').map(Number);
+        const localToday = new Date(tY, tM - 1, tD);
+        
+        // Boundaries para a semana local (domingo a sabado) dependendo da data atual local
+        const startOfWeek = new Date(tY, tM - 1, tD - localToday.getDay());
+        const endOfWeek = new Date(tY, tM - 1, tD + (6 - localToday.getDay()));
+        
+        const todos = [];
+        const semana = [];
+        
+        (clients || []).forEach(client => {
+            if (!client.birth_date) return;
+            const [bY, bMStr, bDStr] = client.birth_date.split('-');
+            const bM = parseInt(bMStr);
+            const bD = parseInt(bDStr);
+            
+            if (bM === tM) {
+                const bDateThisYear = new Date(tY, bM - 1, bD);
+                const isWeek = bDateThisYear >= startOfWeek && bDateThisYear <= endOfWeek;
+                
+                const dataObj = {
+                    nome: client.name,
+                    data: `${bDStr}/${bMStr}`,
+                    idade: tY - parseInt(bY),
+                    phone: client.phone
+                };
+                
+                todos.push(dataObj);
+                if (isWeek) semana.push(dataObj);
+            }
+        });
+        
+        return {
+            aniversariantes: todos.sort((a,b) => parseInt(a.data.split('/')[0]) - parseInt(b.data.split('/')[0])),
+            aniversariantesSemana: semana.sort((a,b) => parseInt(a.data.split('/')[0]) - parseInt(b.data.split('/')[0]))
+        };
+    }, [clients]);
 
     // Failed logs state
     const [failedLogs, setFailedLogs] = useState([]);
@@ -423,10 +457,10 @@ export default function Automacoes() {
                             <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-5 flex items-center justify-between group hover:border-red-600/30 transition-colors">
                                 <div>
                                     <p className="text-sm text-slate-500 mb-1">Aniversariantes da Semana</p>
-                                    <h4 className="text-2xl font-bold text-white">{dashboardData?.aniversariantesSemana?.length || 0}</h4>
+                                    <h4 className="text-2xl font-bold text-white">{birthdayData.aniversariantesSemana.length}</h4>
                                 </div>
                                 <button 
-                                    onClick={() => setBirthdayModal({ open: true, title: 'Aniversariantes da Semana', items: dashboardData?.aniversariantesSemana || [] })}
+                                    onClick={() => setBirthdayModal({ open: true, title: 'Aniversariantes da Semana', items: birthdayData.aniversariantesSemana })}
                                     className="text-xs font-bold text-red-500 bg-red-600/10 px-3 py-1.5 rounded-lg hover:bg-red-600/20 transition-colors"
                                 >
                                     Ver Lista
@@ -435,10 +469,10 @@ export default function Automacoes() {
                             <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-5 flex items-center justify-between group hover:border-red-600/30 transition-colors">
                                 <div>
                                     <p className="text-sm text-slate-500 mb-1">Aniversariantes do Mês</p>
-                                    <h4 className="text-2xl font-bold text-white">{dashboardData?.aniversariantes?.length || 0}</h4>
+                                    <h4 className="text-2xl font-bold text-white">{birthdayData.aniversariantes.length}</h4>
                                 </div>
                                 <button 
-                                    onClick={() => setBirthdayModal({ open: true, title: 'Aniversariantes do Mês', items: dashboardData?.aniversariantes || [] })}
+                                    onClick={() => setBirthdayModal({ open: true, title: 'Aniversariantes do Mês', items: birthdayData.aniversariantes })}
                                     className="text-xs font-bold text-red-500 bg-red-600/10 px-3 py-1.5 rounded-lg hover:bg-red-600/20 transition-colors"
                                 >
                                     Ver Lista

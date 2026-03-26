@@ -75,13 +75,20 @@ export default function AgendamentoPublico() {
                 if (shop.theme_color && THEME_HEX[shop.theme_color]) setThemeKey(shop.theme_color);
 
                 // Fetch services, professionals, business_hours in parallel
-                const [svcRes, proRes, bhRes] = await Promise.all([
+                const [svcRes, proRes, profilesProRes, bhRes] = await Promise.all([
                     supabase.from('services').select('*').eq('barbershop_id', shop.id).order('name'),
                     supabase.from('professionals').select('id, name, specialty').eq('barbershop_id', shop.id).eq('role', 'barber').order('name'),
+                    supabase.from('profiles').select('id, name, specialty').eq('barbershop_id', shop.id).eq('role', 'barber').order('name'),
                     supabase.from('business_hours').select('*').eq('barbershop_id', shop.id).order('day_of_week'),
                 ]);
+
+                const mergedProfessionals = [
+                    ...(proRes.data || []),
+                    ...(profilesProRes.data || [])
+                ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+
                 setServices(svcRes.data || []);
-                setProfessionals(proRes.data || []);
+                setProfessionals(mergedProfessionals);
                 setBusinessHours(bhRes.data || []);
             } catch (err) {
                 console.error('Error loading booking data:', err);

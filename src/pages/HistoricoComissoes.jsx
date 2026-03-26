@@ -5,15 +5,8 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useGlobalData } from '../context/GlobalDataContext';
-
-const _fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-function formatBRL(v) { return _fmtBRL.format(Number(v) || 0); }
-
-function formatDate(iso) {
-    if (!iso) return '—';
-    const d = new Date(iso);
-    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-}
+import { formatCurrency } from '../utils/orderUtils';
+import { formatDate } from '../utils/dateUtils';
 
 export default function HistoricoComissoes() {
     const { adminProfile, loading: globalLoading } = useGlobalData();
@@ -26,14 +19,24 @@ export default function HistoricoComissoes() {
     const [selectedMonth, setSelectedMonth] = useState(`${nowInit.getFullYear()}-${String(nowInit.getMonth() + 1).padStart(2, '0')}`);
     const [selectedPro, setSelectedPro] = useState('all');
     const [prosList, setProsList] = useState([]);
+    
+    // Custom Confirmation Modal
+    const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
     // Barbershop ID is now provided by GlobalDataContext
 
     useEffect(() => {
         if (!barbershopId) return;
         async function fetchBase() {
-            const { data: pros } = await supabase.from('professionals').select('id, name').eq('barbershop_id', barbershopId);
-            setProsList(pros || []);
+            const [prosRes, profilesProsRes] = await Promise.all([
+                supabase.from('professionals').select('id, name').eq('barbershop_id', barbershopId),
+                supabase.from('profiles').select('id, name').eq('barbershop_id', barbershopId).eq('role', 'barber')
+            ]);
+            const merged = [
+                ...(prosRes.data || []),
+                ...(profilesProsRes.data || [])
+            ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+            setProsList(merged);
         }
         fetchBase();
     }, [barbershopId]);
@@ -63,10 +66,31 @@ export default function HistoricoComissoes() {
 
             const { data, error } = await query;
             if (error) {
-                // Ignore relation error temporarily in case table doesn't exist
                 if (error.code !== '42P01') console.error(error);
             } else {
-                setPayments(data || []);
+                // If professionals(name) is null, it means the ID is in 'profiles' table
+                // We'll perform a fallback lookup for those missing names
+                const updatedData = [...(data || [])];
+                const missingIds = updatedData
+                    .filter(p => !p.professionals?.name && p.professional_id)
+                    .map(p => p.professional_id);
+
+                if (missingIds.length > 0) {
+                    const { data: fallbackPros } = await supabase
+                        .from('profiles')
+                        .select('id, name')
+                        .in('id', missingIds);
+                    
+                    const fallbackMap = {};
+                    (fallbackPros || []).forEach(fp => { fallbackMap[fp.id] = fp.name; });
+
+                    updatedData.forEach(p => {
+                        if (!p.professionals?.name && p.professional_id && fallbackMap[p.professional_id]) {
+                            p.professionals = { name: fallbackMap[p.professional_id] };
+                        }
+                    });
+                }
+                setPayments(updatedData);
             }
         } catch (err) {
             console.error(err);
@@ -79,15 +103,20 @@ export default function HistoricoComissoes() {
         fetchHistory();
     }, [fetchHistory]);
 
-    async function handleDeletePayment(id) {
-        if (!confirm('Deseja excluir este registro de pagamento? O saldo do caixa / despesas deverá ser ajustado manualmente se necessário.')) return;
-        const { error } = await supabase.from('commission_payments').delete().eq('id', id);
+    function handleDeletePayment(id) {
+        setDeleteConfirmId(id);
+    }
+    
+    async function confirmDelete() {
+        if (!deleteConfirmId) return;
+        const { error } = await supabase.from('commission_payments').delete().eq('id', deleteConfirmId);
         if (error) {
             toast.error('Erro ao excluir registro.');
         } else {
             toast.success('Registro excluído!');
             fetchHistory();
         }
+        setDeleteConfirmId(null);
     }
 
     const exportToExcel = () => {
@@ -96,9 +125,9 @@ export default function HistoricoComissoes() {
             'Profissional': p.professionals?.name || 'Desconhecido',
             'Data do Pagamento': formatDate(p.paid_at),
             'Período Referência': p.period_label || '-',
-            'Produção Bruta': formatBRL(p.gross_production),
+            'Produção Bruta': formatCurrency(p.gross_production),
             'Taxa (%)': p.commission_rate + '%',
-            'Valor Pago (Comissão)': formatBRL(p.amount)
+            'Valor Pago (Comissão)': formatCurrency(p.amount)
         }));
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
@@ -116,9 +145,9 @@ export default function HistoricoComissoes() {
             p.professionals?.name || 'Desconhecido',
             formatDate(p.paid_at),
             p.period_label,
-            formatBRL(p.gross_production),
+            formatCurrency(p.gross_production),
             p.commission_rate + '%',
-            formatBRL(p.amount)
+            formatCurrency(p.amount)
         ]);
 
         autoTable(doc, {
@@ -133,7 +162,8 @@ export default function HistoricoComissoes() {
     const totalPago = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     return (
-        <main className="flex-1 flex flex-col h-full overflow-hidden">
+        <>
+            <main className="flex-1 flex flex-col h-full overflow-hidden">
 
                 <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
                     {/* Header + Filters */}
@@ -166,7 +196,7 @@ export default function HistoricoComissoes() {
                         <div className="flex items-center gap-3">
                             <div className="text-right mr-4">
                                 <p className="text-[11px] font-semibold text-slate-500 uppercase">Total Pago no Mês</p>
-                                <p className="text-xl font-bold text-red-500">{formatBRL(totalPago)}</p>
+                                <p className="text-xl font-bold text-red-500">{formatCurrency(totalPago)}</p>
                             </div>
                             <button onClick={exportToExcel} className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors border border-slate-600" title="Exportar Excel">
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
@@ -217,13 +247,13 @@ export default function HistoricoComissoes() {
                                                     {p.period_label || 'Avulso'}
                                                 </td>
                                                 <td className="px-5 py-3 text-right text-slate-300">
-                                                    {formatBRL(p.gross_production)}
+                                                    {formatCurrency(p.gross_production)}
                                                 </td>
                                                 <td className="px-5 py-3 text-center text-slate-500">
                                                     {p.commission_rate}%
                                                 </td>
                                                 <td className="px-5 py-3 text-right font-bold text-green-400">
-                                                    {formatBRL(p.amount)}
+                                                    {formatCurrency(p.amount)}
                                                 </td>
                                                 <td className="px-5 py-3 text-center">
                                                     <button onClick={() => handleDeletePayment(p.id)} className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" title="Excluir">
@@ -239,5 +269,24 @@ export default function HistoricoComissoes() {
                     </div>
                 </div>
             </main>
+
+            {/* Custom Delete Confirmation Modal */}
+            {deleteConfirmId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)} />
+                    <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+                        <div className="flex items-center gap-3 mb-4 text-rose-500">
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                            <h3 className="text-lg font-bold text-slate-100">Excluir Pagamento</h3>
+                        </div>
+                        <p className="text-sm text-slate-400 mb-6 leading-relaxed">Deseja realmente excluir este registro de pagamento? O saldo do caixa e as despesas deverão ser ajustados manualmente se necessário.</p>
+                        <div className="flex gap-3">
+                            <button onClick={() => setDeleteConfirmId(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors">Cancelar</button>
+                            <button onClick={confirmDelete} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20">Excluir</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }

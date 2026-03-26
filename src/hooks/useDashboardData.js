@@ -211,14 +211,22 @@ export default function useDashboardData() {
                 const last7DaysData = {}; // Para faturamento 7 dias
                 const nowMs = today.getTime();
 
+                // Helper to safely open date avoiding timezone shifts if there's no Z
+                const openDateSafely = (dateStr) => {
+                    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-')) {
+                        return new Date(dateStr + 'Z');
+                    }
+                    return new Date(dateStr);
+                };
+
                 allOrdersRaw.forEach(o => {
                     const status = o.status;
                     const amount = parseFloat(o.total_amount || 0);
 
                     // REGRA DE HOJE: comparar scheduled_at com data de hoje logica simplificada
-                    const isHoje = o.scheduled_at && getLocalDateISO(o.scheduled_at) === todayStr;
+                    const isHoje = o.scheduled_at && getLocalDateISO(openDateSafely(o.scheduled_at)) === todayStr;
                     const isScheduledToday = isHoje;
-                    const isClosedToday = o.closed_at && getLocalDateISO(o.closed_at) === todayStr;
+                    const isClosedToday = o.closed_at && getLocalDateISO(openDateSafely(o.closed_at)) === todayStr;
                     const isClosedThisMonth = status === 'closed';
 
                     // 2. Comandas Abertas (globais, independentes do mês)
@@ -262,7 +270,7 @@ export default function useDashboardData() {
                         });
                     }
 
-                    const isCreatedToday = o.created_at && getLocalDateISO(o.created_at) === todayStr;
+                    const isCreatedToday = o.created_at && getLocalDateISO(openDateSafely(o.created_at)) === todayStr;
 
                     // Modal "Não Compareceu" / Cancelados DE HOJE ESTITAMENTE
                     if (isScheduledToday || isCreatedToday) {
@@ -318,14 +326,8 @@ export default function useDashboardData() {
                 // Soma diretamente do raw (total_amount), sem parsing de string formatada
                 if (faturamentoDiaRPC === 0) {
                     faturamentoDia = allOrdersRaw
-                        .filter(o => o.status === 'closed' && o.closed_at && getLocalDateISO(new Date(o.closed_at)) === todayStr)
+                        .filter(o => o.status === 'closed' && o.closed_at && getLocalDateISO(openDateSafely(o.closed_at)) === todayStr)
                         .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-                    // Se ainda 0, tenta usando scheduled_at (para orders sem closed_at)
-                    if (faturamentoDia === 0) {
-                        faturamentoDia = allOrdersRaw
-                            .filter(o => o.status === 'closed' && getLocalDateISO(new Date(o.scheduled_at || o.created_at)) === todayStr)
-                            .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-                    }
                 }
 
                 // Meta Mensal Map
@@ -685,9 +687,8 @@ export default function useDashboardData() {
                         ticketMedio, 
                         activeSubsCount, 
                         mrr, 
-                        atendimentosHojeClosed: detalheAtendimentosHoje.length,
-                        // Bug 5 fix: unificar fonte — usar getLocalDateISO (timezone-correct) em vez de toLocaleDateString
-                        atendimentosHojeTotal: allOrdersRaw.filter(o => o.scheduled_at && getLocalDateISO(new Date(o.scheduled_at)) === todayStr).length
+                        atendimentosHojeClosed: atendimentosHojeClosed,
+                        atendimentosHojeTotal: atendimentosHojeTotal
                     },
                     // Bug 1 fix: expor com as chaves que Dashboard.jsx espera
                     ordersToday: detalheAtendimentosHoje,

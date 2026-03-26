@@ -1,39 +1,29 @@
-const fs = require('fs');
 const { createClient } = require('@supabase/supabase-js');
-const SUPABASE_URL = 'https://mafntxroeesyvwjybvjk.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hZm50eHJvZWVzeXZ3anlidmprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMjI2ODgsImV4cCI6MjA4Nzc5ODY4OH0.Nlzw_sbt10Esm4RECW9_Grr9O52NS7eAcYq4NnHDHrU';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+require('dotenv').config({ path: 'c:/Users/CAIO/Desktop/Antigravityy/thebarbers/.env' });
 
-const localDateFunc = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-async function run() {
-    // Need to get the barbershop ID first
-    const { data: shop } = await supabase.from('barbershops').select('id').limit(1).single();
-    
-    const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0);
-    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-    
-    console.log("Input:", {
-        bId: shop.id,
-        p_start_month: startOfMonth.toISOString(),
-        p_end_month: endOfMonth.toISOString(),
-        p_start_today: startOfDay.toISOString(),
-        p_end_today: endOfDay.toISOString(),
-        p_date_today: localDateFunc(today)
+async function getSummary() {
+    const { data: bs } = await supabase.from('barber_shops').select('id').limit(1);
+    const realBId = bs[0].id;
+    console.log('Shop ID:', realBId);
+
+    // Call RPC exactly like the frontend at 01:38 AM
+    const { data, error } = await supabase.rpc('get_dashboard_summary', {
+        p_b_id: realBId,
+        p_start_month: '2026-03-01T03:00:00.000Z',
+        p_end_month: '2026-04-01T02:59:59.999Z',
+        p_start_today: '2026-03-26T03:00:00.000Z',
+        p_end_today: '2026-03-27T02:59:59.999Z',
+        p_date_today: '2026-03-26'
     });
 
-    const { data: summaryData, error: summaryErr } = await supabase.rpc('get_dashboard_summary', {
-        p_b_id: shop.id,
-        p_start_month: startOfMonth.toISOString(),
-        p_end_month: endOfMonth.toISOString(),
-        p_start_today: startOfDay.toISOString(),
-        p_end_today: endOfDay.toISOString(),
-        p_date_today: localDateFunc(today)
-    });
-    
-    fs.writeFileSync('.tmp/test_rpc.json', JSON.stringify({ summaryData, summaryErr }, null, 2));
+    console.log('RPC Result:', JSON.stringify(data, null, 2));
+
+    const { data: raw } = await supabase.from('orders').select('id, total_amount, closed_at, scheduled_at').eq('barbershop_id', realBId).order('closed_at', { ascending: false }).limit(5);
+    console.log('Recent orders:', JSON.stringify(raw, null, 2));
 }
-run();
+
+getSummary();

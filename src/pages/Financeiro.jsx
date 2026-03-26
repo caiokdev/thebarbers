@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import * as XLSX from 'xlsx';
+import { useFinanceiroData } from '../hooks/useFinanceiroData';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatDate, formatTime, formatDateTime, getLocalDateISO } from '../utils/dateUtils';
@@ -13,11 +14,12 @@ import { useGlobalData } from '../context/GlobalDataContext';
    KPIs de Médio Prazo • Caixa do Dia • Comissões • Histórico
    ═══════════════════════════════════════════════════════════════ */
 
-const getMasterPassword = () => localStorage.getItem('admin_password') || 'admin123';
+const getMasterPassword = () => {
+    console.warn("getMasterPassword was removed. Use verify_master_password RPC instead.");
+    return null;
+};
 
-function formatBRL(v) {
-    return formatCurrency(v);
-}
+
 
 function _formatDate(iso) {
     if (!iso) return '—';
@@ -29,336 +31,44 @@ function _formatTime(iso) {
 }
 
 export default function Financeiro() {
-    const { adminProfile, professionals, clients, loading: globalLoading } = useGlobalData();
-    const barbershopId = adminProfile?.barbershopId;
+    console.log('Financeiro hook loaded');
+    const {
+        today, loading,
+        selectedMonth, setSelectedMonth,
+        isCurrentMonth, selectedMonthLabel, selYear,
+        entradasHoje, saidasHoje, saldoDia,
+        entradas7Dias, saidas7Dias, saldo7Dias,
+        entradasMes, saidasMes, saldoMes,
+        totalAssinantes, assinantesAtivos, assinantesAtrasados,
+        listaSaidas, historicoComandas,
+        showAllHistorico, setShowAllHistorico,
+        currentPage, setCurrentPage, itemsPerPage,
+        pedidosHoje, pedidos7Dias, pedidosMes, listaAssinantes,
+        periodoComissao, setPeriodoComissao,
+        comissoesPorBarbeiro,
+        addExpense, verifyPassword, updateCommissionRate, payCommission
+    } = useFinanceiroData();
 
-    // ── Commission vault ──
+    // ── Local UI States ──
     const [isCommissionUnlocked, setIsCommissionUnlocked] = useState(false);
     const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
     const [passwordInput, setPasswordInput] = useState('');
     const [isPasswordError, setIsPasswordError] = useState(false);
-
-    // ── Core state ──
-    const [loading, setLoading] = useState(true);
-
-    // ── Caixa do Dia ──
-    const [entradasHoje, setEntradasHoje] = useState(0);
-    const [saidasHoje, setSaidasHoje] = useState(0);
-    const [listaSaidas, setListaSaidas] = useState([]);
-
-    // ── KPI states (net balance) ──
-    const [entradas7Dias, setEntradas7Dias] = useState(0);
-    const [saidas7Dias, setSaidas7Dias] = useState(0);
-    const [entradasMes, setEntradasMes] = useState(0);
-    const [saidasMes, setSaidasMes] = useState(0);
-    const [totalAssinantes, setTotalAssinantes] = useState(0);
-    const [assinantesAtivos, setAssinantesAtivos] = useState(0);
-    const [assinantesAtrasados, setAssinantesAtrasados] = useState(0);
-
-    // ── Commissions ──
-    const [periodoComissao, setPeriodoComissao] = useState('semana');
-    const [allClosedOrders, setAllClosedOrders] = useState([]);
-    const [proMapState, setProMapState] = useState({});
-    const [rateMap, setRateMap] = useState({}); // { proId: commission_rate }
-    const [commissionPayments, setCommissionPayments] = useState([]); // Array para armazenar os pagamentos já feitos
-
-    // ── Global month filter ──
-    const nowInit = new Date();
-    const [selectedMonth, setSelectedMonth] = useState(`${nowInit.getFullYear()}-${String(nowInit.getMonth() + 1).padStart(2, '0')}`);
-
-    // ── Drill-down arrays (para o modal) ──
-    const [pedidosHoje, setPedidosHoje] = useState([]);
-    const [pedidos7Dias, setPedidos7Dias] = useState([]);
-    const [pedidosMes, setPedidosMes] = useState([]);
-    const [listaAssinantes, setListaAssinantes] = useState([]);
-
-    // ── Details modal ──
-    const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-    const [detailsModalConfig, setDetailsModalConfig] = useState({ title: '', data: [], type: 'orders' });
-
-    // ── Histórico + Paginação ──
-    const [historicoComandas, setHistoricoComandas] = useState([]);
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 10;
-
-    // ── Expandable row states ──
-    const [expandedModalOrderId, setExpandedModalOrderId] = useState(null);
-    const [expandedHistoricoOrderId, setExpandedHistoricoOrderId] = useState(null);
-    const [showAllHistorico, setShowAllHistorico] = useState(false);
+    const [checkingPassword, setCheckingPassword] = useState(false);
     const [expandedProfessionalId, setExpandedProfessionalId] = useState(null);
-    const [clientMapState, setClientMapState] = useState({});
 
-
-
-    // ── Expense modal ──
     const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-    const [expenseDesc, setExpenseDesc] = useState('');
     const [expenseAmount, setExpenseAmount] = useState('');
+    const [expenseDesc, setExpenseDesc] = useState('');
     const [savingExpense, setSavingExpense] = useState(false);
 
-    // ── Dates (UTC ISO — local midnight → UTC for Supabase comparison) ──
-    const today = new Date();
+    const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+    const [detailsModalConfig, setDetailsModalConfig] = useState({ title: '', data: [], type: '' });
+    const [expandedModalOrderId, setExpandedModalOrderId] = useState(null);
+    const [expandedHistoricoOrderId, setExpandedHistoricoOrderId] = useState(null);
 
-    // Hoje: meia-noite local → UTC ISO (ex: 00:00 BRT → 03:00Z)
-    const startOfDayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).toISOString();
-    const endOfDayISO = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).toISOString();
-    const sevenDaysAgo = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6, 0, 0, 0, 0).toISOString();
-
-    // Mês selecionado: primeiro/último dia local → UTC ISO
-    const [selYear, selMonthNum] = selectedMonth.split('-').map(Number);
-    const startOfMonthISO = new Date(selYear, selMonthNum - 1, 1, 0, 0, 0, 0).toISOString();
-    const endOfMonthISO = new Date(selYear, selMonthNum, 0, 23, 59, 59, 999).toISOString();
-    const selectedMonthLabel = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][selMonthNum - 1];
-    const isCurrentMonth = selYear === today.getFullYear() && selMonthNum === (today.getMonth() + 1);
-
-    // ── Master fetch ──
-    const fetchAll = useCallback(async () => {
-        if (!barbershopId) return;
-        setLoading(true);
-        try {
-            const bId = barbershopId;
-
-            // ═══ 1. ENTRADAS HOJE (orders closed today) — com dados para drill-down ═══
-            const { data: todayOrders } = await supabase
-                .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type)')
-                .eq('barbershop_id', bId)
-                .eq('status', 'closed')
-                .gte('closed_at', startOfDayISO)
-                .lte('closed_at', endOfDayISO);
-
-            const totalEntradas = (todayOrders || []).reduce(
-                (sum, o) => sum + parseFloat(o.total_amount || 0), 0
-            );
-            setEntradasHoje(totalEntradas);
-
-            // ═══ 2. SAÍDAS DO MÊS SELECIONADO (expenses) ═══
-            const { data: expenses } = await supabase
-                .from('expenses')
-                .select('id, description, amount, created_at')
-                .eq('barbershop_id', bId)
-                .gte('created_at', startOfMonthISO)
-                .lte('created_at', endOfMonthISO)
-                .order('created_at', { ascending: false });
-
-            const totalSaidas = (expenses || []).reduce(
-                (sum, e) => sum + parseFloat(e.amount || 0), 0
-            );
-            setSaidasHoje(totalSaidas);
-            setListaSaidas(expenses || []);
-
-            // ═══ 3. FATURAMENTO 7 DIAS + DESPESAS 7 DIAS ═══
-            const { data: orders7d } = await supabase
-                .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type)')
-                .eq('barbershop_id', bId)
-                .eq('status', 'closed')
-                .gte('closed_at', sevenDaysAgo);
-
-            const ent7 = (orders7d || []).reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-            setEntradas7Dias(ent7);
-
-            const { data: expenses7d } = await supabase
-                .from('expenses')
-                .select('amount')
-                .eq('barbershop_id', bId)
-                .gte('created_at', sevenDaysAgo);
-            const sai7 = (expenses7d || []).reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
-            setSaidas7Dias(sai7);
-
-            // ═══ 4. FATURAMENTO MÊS + DESPESAS MÊS ═══
-            const { data: ordersMes } = await supabase
-                .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type)')
-                .eq('barbershop_id', bId)
-                .eq('status', 'closed')
-                .gte('closed_at', startOfMonthISO)
-                .lte('closed_at', endOfMonthISO);
-
-            const entM = (ordersMes || []).reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-            setEntradasMes(entM);
-
-            const { data: expensesMes } = await supabase
-                .from('expenses')
-                .select('amount')
-                .eq('barbershop_id', bId)
-                .gte('created_at', startOfMonthISO)
-                .lte('created_at', endOfMonthISO);
-            const saiM = (expensesMes || []).reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
-            setSaidasMes(saiM);
-
-            // ═══ 5. MÉTRICAS DE ASSINANTES (tabela clients, NÃO subscriptions) ═══
-            const { data: assinantesData } = await supabase
-                .from('clients')
-                .select('id, name, subscription_status')
-                .eq('barbershop_id', bId)
-                .eq('is_subscriber', true);
-
-            const allSubs = assinantesData || [];
-            setTotalAssinantes(allSubs.length);
-            setAssinantesAtivos(allSubs.filter(s => s.subscription_status === 'active').length);
-            setAssinantesAtrasados(allSubs.filter(s => s.subscription_status !== 'active' && s.subscription_status !== 'none').length);
-
-            // ═══ 5.5 PAGAMENTOS DE COMISSÕES ═══
-            const { data: payments } = await supabase
-                .from('commission_payments')
-                .select('*')
-                .eq('barbershop_id', bId);
-            setCommissionPayments(payments || []);
-
-            // ═══ 6. HISTÓRICO DE COMANDAS FECHADAS (filtrado pelo mês) ═══
-            let historicoQuery = supabase
-                .from('orders')
-                .select('id, total_amount, created_at, scheduled_at, closed_at, payment_method, client_id, professional_id, notes, order_items(name, price, quantity, item_type)')
-                .eq('barbershop_id', bId)
-                .eq('status', 'closed')
-                .gte('closed_at', startOfMonthISO)
-                .lte('closed_at', endOfMonthISO)
-                .order('closed_at', { ascending: false });
-
-            if (!showAllHistorico) {
-                historicoQuery = historicoQuery.limit(25);
-            }
-
-            const { data: historico } = await historicoQuery;
-
-            // Resolve client + professional names (for ALL order arrays)
-            const allOrderArrays = [todayOrders, orders7d, ordersMes, historico].filter(Boolean);
-            const allOrders = allOrderArrays.flat();
-            const clientIds = [...new Set(allOrders.map(o => o.client_id).filter(Boolean))];
-            const proIds = [...new Set(allOrders.map(o => o.professional_id).filter(Boolean))];
-            // Subscribers already have names from the query above
-            const allClientIds = [...new Set(clientIds)];
-
-            let clientMap = {}, proMap = {};
-
-            if (allClientIds.length > 0) {
-                const { data: clients } = await supabase.from('clients').select('id, name').in('id', allClientIds);
-                (clients || []).forEach(c => { clientMap[c.id] = c.name; });
-            }
-            if (proIds.length > 0) {
-                const { data: pros, error: proError } = await supabase.from('professionals').select('id, name').in('id', proIds);
-                if (proError) console.error("Error fetching professionals:", proError);
-
-                const newRateMap = {};
-                (pros || []).forEach(p => {
-                    proMap[p.id] = p.name;
-                    // Temporarily hardcode or fetch from somewhere else if commission_rate isn't on professionals
-                    newRateMap[p.id] = p.commission_rate ?? 50;
-                });
-                setRateMap(newRateMap);
-            }
-            setProMapState(proMap);
-            setClientMapState(clientMap);
-
-
-            // Store all closed orders for commission calculation
-            setAllClosedOrders((historico || []).map(o => ({
-                ...o, total_amount: parseFloat(o.total_amount || 0),
-            })));
-
-            // Build enriched arrays for drill-down
-            const enrich = (arr) => (arr || []).map(o => ({
-                id: o.id, cliente: clientMap[o.client_id] || 'Cliente Avulso',
-                valor: parseFloat(o.total_amount || 0), data: o.closed_at,
-                order_items: o.order_items || [],
-            }));
-            setPedidosHoje(enrich(todayOrders));
-            setPedidos7Dias(enrich(orders7d));
-            setPedidosMes(enrich(ordersMes));
-            setListaAssinantes(allSubs.map(s => ({
-                id: s.id, cliente: s.name || 'Sem nome', status: s.subscription_status || 'active',
-            })));
-
-            setHistoricoComandas((historico || []).map(o => ({
-                id: o.id,
-                cliente: clientMap[o.client_id] || 'Sem nome',
-                profissional: proMap[o.professional_id] || 'Sem nome',
-                abertura: o.scheduled_at || o.created_at,
-                fechamento: o.closed_at,
-                valor: parseFloat(o.total_amount || 0),
-                pagamento: o.payment_method || '—',
-                order_items: o.order_items || [],
-            })));
-
-        } catch (err) {
-            console.error('Erro ao buscar dados do financeiro:', err);
-        } finally {
-            setLoading(false);
-        }
-    }, [barbershopId, startOfDayISO, endOfDayISO, sevenDaysAgo, startOfMonthISO, endOfMonthISO, selectedMonth, showAllHistorico]);
-
-    useEffect(() => {
-        if (barbershopId) fetchAll();
-    }, [barbershopId, fetchAll]);
-
-    // ── Reset pagination and effects on month change ──
-    useEffect(() => {
-        setCurrentPage(1);
-        if (!isCurrentMonth) {
-            setPeriodoComissao('mes'); // Force 'mes' if viewing a past month
-        }
-    }, [selectedMonth, isCurrentMonth]);
-
-
-    // ── Saldos ──
-    const saldoDia = entradasHoje - saidasHoje;
-    const saldo7Dias = entradas7Dias - saidas7Dias;
-    const saldoMes = entradasMes - saidasMes;
-
-    // ── Commissions engine (dynamic rates) ──
-    const comissoesPorBarbeiro = React.useMemo(() => {
-        const now = new Date();
-        let filteredOrders = allClosedOrders;
-        if (periodoComissao === 'hoje') {
-            const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-            filteredOrders = allClosedOrders.filter(o => o.closed_at >= dayStart);
-        } else if (periodoComissao === 'semana') {
-            const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).toISOString();
-            filteredOrders = allClosedOrders.filter(o => o.closed_at >= weekStart);
-        }
-        const grouped = {};
-        filteredOrders.forEach(o => {
-            const pid = o.professional_id;
-            if (!pid) return;
-            if (!grouped[pid]) grouped[pid] = { nome: proMapState[pid] || 'Sem nome', total: 0, orders: [] };
-            grouped[pid].total += o.total_amount;
-            grouped[pid].orders.push({
-                ...o,
-                cliente: clientMapState[o.client_id] || 'Cliente Avulso',
-            });
-        });
-
-        let comissoes = Object.entries(grouped).map(([id, v]) => {
-            const rawRate = rateMap[id];
-            const rate = (typeof rawRate === 'number' && !isNaN(rawRate)) ? rawRate : 50;
-            
-            // Subdivide orders into paid and unpaid based on the [PAID] flag
-            const unpaidOrders = v.orders.filter(o => !(o.notes || '').includes('[PAID]'));
-            const paidOrders = v.orders.filter(o => (o.notes || '').includes('[PAID]'));
-
-            const unpaidTotal = unpaidOrders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-            const paidTotal = paidOrders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-
-            let remainingCommission = unpaidTotal * (rate / 100);
-            let alreadyPaidCommission = paidTotal * (rate / 100);
-            
-            if (remainingCommission < 0.01) remainingCommission = 0;
-
-            return {
-                id, 
-                nome: v.nome, 
-                totalGerado: v.total,
-                rate, 
-                valorComissao: remainingCommission, 
-                valorPago: alreadyPaidCommission,
-                orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)),
-                unpaidOrders // keep track of which exact orders are pending
-            };
-        });
-
-        return comissoes.filter(c => c.valorComissao > 0).sort((a, b) => b.totalGerado - a.totalGerado);
-    }, [allClosedOrders, periodoComissao, proMapState, rateMap, clientMapState, commissionPayments, selectedMonthLabel]);
+    // Confirmation Modal for Commission
+    const [confirmModal, setConfirmModal] = useState({ open: false, targetData: null });
 
     // ── Save expense ──
     async function handleSaveExpense() {
@@ -368,18 +78,11 @@ export default function Financeiro() {
         }
         setSavingExpense(true);
         try {
-            const { error } = await supabase
-                .from('expenses')
-                .insert({
-                    barbershop_id: barbershopId,
-                    description: expenseDesc.trim(),
-                    amount: parseFloat(expenseAmount),
-                });
-            if (error) throw error;
+            await addExpense(expenseDesc.trim(), parseFloat(expenseAmount));
             setIsExpenseModalOpen(false);
             setExpenseDesc('');
             setExpenseAmount('');
-            fetchAll();
+            toast.success('Saída registrada com sucesso.');
         } catch (err) {
             toast.error(`Erro ao registrar saída: ${err.message}`);
         } finally {
@@ -387,16 +90,27 @@ export default function Financeiro() {
         }
     }
 
-    // ── Commission handlers ──
-    function handleUnlock() {
-        const masterPassword = getMasterPassword();
-        if (passwordInput === masterPassword) {
-            setIsCommissionUnlocked(true);
-            setIsPasswordModalOpen(false);
-            setPasswordInput('');
-            setIsPasswordError(false);
-        } else {
+    async function handleUnlock() {
+        if (!passwordInput) {
             setIsPasswordError(true);
+            return;
+        }
+        setCheckingPassword(true);
+        try {
+            const isValid = await verifyPassword(passwordInput);
+            if (isValid) {
+                setIsCommissionUnlocked(true);
+                setIsPasswordModalOpen(false);
+                setPasswordInput('');
+                setIsPasswordError(false);
+            } else {
+                setIsPasswordError(true);
+            }
+        } catch (err) {
+            console.error('Erro ao verificar senha:', err);
+            setIsPasswordError(true);
+        } finally {
+            setCheckingPassword(false);
         }
     }
 
@@ -405,45 +119,30 @@ export default function Financeiro() {
         if (input === null) return;
         const newRate = parseFloat(input);
         if (isNaN(newRate) || newRate < 0 || newRate > 100) { toast.error('Valor inválido. Use um número entre 0 e 100.'); return; }
-        const { error } = await supabase.from('professionals').update({ commission_rate: newRate }).eq('id', proId);
-        if (error) { toast.error(`Erro: ${error.message}`); return; }
-        setRateMap(prev => ({ ...prev, [proId]: newRate }));
+        try {
+            await updateCommissionRate(proId, newRate);
+            toast.success('Taxa atualizada.');
+        } catch (error) {
+            toast.error(`Erro: ${error.message}`);
+        }
     }
 
-    async function handlePayCommission(b) {
-        if (!confirm(`Confirma o pagamento de comissão no valor de ${formatBRL(b.valorComissao)} para ${b.nome}?`)) return;
-        setLoading(true);
+    function triggerPayCommission(b) {
+        setConfirmModal({
+            open: true,
+            targetData: b
+        });
+    }
+
+    async function handleConfirmPayCommission() {
+        const b = confirmModal.targetData;
+        if (!b) return;
         try {
-            // 1. Mark unpaid orders with [PAID] flag
-            if (b.unpaidOrders && b.unpaidOrders.length > 0) {
-                await Promise.all(b.unpaidOrders.map(async (o) => {
-                    const newNotes = (o.notes || '') + '\n[PAID]';
-                    await supabase.from('orders').update({ notes: newNotes.trim() }).eq('id', o.id);
-                }));
-            }
-
-            // 2. Save historical receipt
-            const periodLabel = periodoComissao === 'mes' ? selectedMonthLabel : (periodoComissao === 'semana' ? 'Esta Semana' : 'Hoje');
-            const { error } = await supabase.from('commission_payments').insert({
-                barbershop_id: barbershopId,
-                professional_id: b.id,
-                amount: b.valorComissao,
-                commission_rate: b.rate,
-                gross_production: b.totalGerado,
-                period_label: periodLabel
-            });
-            if (error) {
-                if (error.code === '42P01') toast.error('Execute o comando SQL para criar a tabela de comissões primeiro!');
-                else throw error;
-                return;
-            }
+            await payCommission(b);
             toast.success('Pagamento registrado no histórico!');
-            fetchAll();
-
+            setConfirmModal({ open: false, targetData: null });
         } catch (err) {
             toast.error(`Erro ao registrar: ${err.message}`);
-        } finally {
-            setLoading(false);
         }
     }
 
@@ -475,7 +174,7 @@ export default function Financeiro() {
         }
 
         const dataToExport = historicoComandas.map(item => {
-            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatBRL(it.price)})`).join(' | ');
+            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatCurrency(it.price)})`).join(' | ');
 
             return {
                 'Cliente': item.cliente,
@@ -521,7 +220,7 @@ export default function Financeiro() {
                 `${_formatDate(item.fechamento)} ${_formatTime(item.fechamento)}`,
                 payLabels[item.pagamento] || item.pagamento,
                 itemsList || '-',
-                formatBRL(item.valor)
+                formatCurrency(item.valor)
             ];
             tableRows.push(rowData);
         });
@@ -544,7 +243,7 @@ export default function Financeiro() {
     const exportProfessionalExcel = (b) => {
         if (!b.orders || b.orders.length === 0) return toast.error('Não há comandas para exportar.');
         const dataToExport = b.orders.map(item => {
-            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatBRL(it.price)})`).join(' | ');
+            const itemsList = (item.order_items || []).map(it => `${it.quantity}x ${it.name} (${formatCurrency(it.price)})`).join(' | ');
             return {
                 'Cliente/Pedido': item.cliente || item.id.split('-')[0],
                 'Data Fechamento': `${_formatDate(item.closed_at)} ${_formatTime(item.closed_at)}`,
@@ -580,8 +279,8 @@ export default function Financeiro() {
                 item.cliente || item.id.split('-')[0],
                 payLabels[item.payment_method] || item.payment_method || '—',
                 itemsList || '-',
-                formatBRL(prodVal),
-                formatBRL(comVal)
+                formatCurrency(prodVal),
+                formatCurrency(comVal)
             ];
         });
 
@@ -597,7 +296,7 @@ export default function Financeiro() {
         const finalY = doc.lastAutoTable.finalY || 35;
         doc.setFontSize(12);
         doc.setTextColor(50);
-        doc.text(`Produção Bruta: ${formatBRL(b.totalGerado)}  |  Comissão a Pagar: ${formatBRL(b.valorComissao)}`, 14, finalY + 10);
+        doc.text(`Produção Bruta: ${formatCurrency(b.totalGerado)}  |  Comissão a Pagar: ${formatCurrency(b.valorComissao)}`, 14, finalY + 10);
 
         doc.save(`Comissao_${b.nome.replace(/\s+/g, '_')}_${periodoComissao}.pdf`);
     };
@@ -661,11 +360,11 @@ export default function Financeiro() {
                                     {isCurrentMonth ? (
                                         <>
                                             <p className={`text-2xl font-bold ${saldoDia >= 0 ? '' : 'text-rose-400'}`} style={saldoDia >= 0 ? { color: '#B59410' } : {}}>
-                                                {saldoDia < 0 ? '- ' : ''}{formatBRL(Math.abs(saldoDia))}
+                                                {saldoDia < 0 ? '- ' : ''}{formatCurrency(Math.abs(saldoDia))}
                                             </p>
                                             <div className="flex gap-4 mt-2">
-                                                <span className="text-[11px] text-green-400/80">↑ {formatBRL(entradasHoje)}</span>
-                                                <span className="text-[11px] text-rose-400/70">↓ {formatBRL(saidasHoje)}</span>
+                                                <span className="text-[11px] text-green-400/80">↑ {formatCurrency(entradasHoje)}</span>
+                                                <span className="text-[11px] text-rose-400/70">↓ {formatCurrency(saidasHoje)}</span>
                                             </div>
                                         </>
                                     ) : (
@@ -689,11 +388,11 @@ export default function Financeiro() {
                                     {isCurrentMonth ? (
                                         <>
                                             <p className={`text-2xl font-bold ${saldo7Dias >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
-                                                {saldo7Dias < 0 ? '- ' : ''}{formatBRL(Math.abs(saldo7Dias))}
+                                                {saldo7Dias < 0 ? '- ' : ''}{formatCurrency(Math.abs(saldo7Dias))}
                                             </p>
                                             <div className="flex gap-4 mt-2">
-                                                <span className="text-[11px] text-green-400/80">↑ {formatBRL(entradas7Dias)}</span>
-                                                <span className="text-[11px] text-rose-400/70">↓ {formatBRL(saidas7Dias)}</span>
+                                                <span className="text-[11px] text-green-400/80">↑ {formatCurrency(entradas7Dias)}</span>
+                                                <span className="text-[11px] text-rose-400/70">↓ {formatCurrency(saidas7Dias)}</span>
                                             </div>
                                         </>
                                     ) : (
@@ -715,11 +414,11 @@ export default function Financeiro() {
                                         </div>
                                     </div>
                                     <p className={`text-2xl font-bold ${saldoMes >= 0 ? 'text-violet-400' : 'text-rose-400'}`}>
-                                        {saldoMes < 0 ? '- ' : ''}{formatBRL(Math.abs(saldoMes))}
+                                        {saldoMes < 0 ? '- ' : ''}{formatCurrency(Math.abs(saldoMes))}
                                     </p>
                                     <div className="flex gap-4 mt-2">
-                                        <span className="text-[11px] text-green-400/80">↑ {formatBRL(entradasMes)}</span>
-                                        <span className="text-[11px] text-rose-400/70">↓ {formatBRL(saidasMes)}</span>
+                                        <span className="text-[11px] text-green-400/80">↑ {formatCurrency(entradasMes)}</span>
+                                        <span className="text-[11px] text-rose-400/70">↓ {formatCurrency(saidasMes)}</span>
                                     </div>
                                 </div>
 
@@ -775,7 +474,7 @@ export default function Financeiro() {
                                                             <p className="text-[11px] text-slate-600">{_formatTime(s.created_at)}</p>
                                                         </div>
                                                     </div>
-                                                    <p className="text-sm font-semibold text-rose-400 ml-3 flex-shrink-0">- {formatBRL(s.amount)}</p>
+                                                    <p className="text-sm font-semibold text-rose-400 ml-3 flex-shrink-0">- {formatCurrency(s.amount)}</p>
                                                 </div>
                                             ))}
                                         </div>
@@ -858,14 +557,14 @@ export default function Financeiro() {
                                                                         </svg>
                                                                         <p className="text-sm font-semibold text-slate-200">{b.nome}</p>
                                                                     </div>
-                                                                    <button onClick={(e) => { e.stopPropagation(); handlePayCommission(b); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-red-600/10 text-red-500/70 border border-red-600/20 hover:bg-red-600/20 hover:text-red-500 transition-all">
+                                                                    <button onClick={(e) => { e.stopPropagation(); triggerPayCommission(b); }} className="text-[10px] px-2.5 py-1 rounded-lg bg-red-600/10 text-red-500/70 border border-red-600/20 hover:bg-red-600/20 hover:text-red-500 transition-all">
                                                                         ✓ Marcar como Pago
                                                                     </button>
                                                                 </div>
                                                                 <div className="flex items-center justify-between pl-6">
-                                                                    <span className="text-[11px] text-slate-500">Produção Bruta: {formatBRL(b.totalGerado)}</span>
+                                                                    <span className="text-[11px] text-slate-500">Produção Bruta: {formatCurrency(b.totalGerado)}</span>
                                                                     <div className="flex items-center gap-1.5">
-                                                                        <span className="text-sm font-bold" style={{ color: '#B59410' }}>Comissão ({b.rate}%): {formatBRL(b.valorComissao)}</span>
+                                                                        <span className="text-sm font-bold" style={{ color: '#B59410' }}>Comissão ({b.rate}%): {formatCurrency(b.valorComissao)}</span>
                                                                         <button onClick={(e) => { e.stopPropagation(); handleEditRate(b.id, b.nome); }} className="text-slate-500 hover:text-amber-400 transition-colors" title="Editar taxa">
                                                                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
@@ -928,7 +627,7 @@ export default function Financeiro() {
                                                                                                     </span>
                                                                                                 </td>
                                                                                                 <td className="px-3 py-2.5 text-right font-bold" style={{ color: '#B59410' }}>
-                                                                                                    {formatBRL(comVal)}
+                                                                                                    {formatCurrency(comVal)}
                                                                                                 </td>
                                                                                             </tr>
                                                                                         );
@@ -1055,7 +754,7 @@ export default function Financeiro() {
                                                                     </span>
                                                                 </td>
                                                                 <td className="py-3 text-right">
-                                                                    <p className="font-bold" style={{ color: '#B59410' }}>{formatBRL(h.valor)}</p>
+                                                                    <p className="font-bold" style={{ color: '#B59410' }}>{formatCurrency(h.valor)}</p>
                                                                 </td>
                                                             </tr>
                                                             {isExpH && (
@@ -1070,7 +769,7 @@ export default function Financeiro() {
                                                                                             {items.filter(it => it.item_type === 'service').map((it, j) => (
                                                                                                 <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                                                     <span>{it.quantity}x {it.name}</span>
-                                                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                                                    <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                                                 </div>
                                                                                             ))}
                                                                                         </div>
@@ -1081,7 +780,7 @@ export default function Financeiro() {
                                                                                             {items.filter(it => it.item_type === 'product').map((it, j) => (
                                                                                                 <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                                                     <span>{it.quantity}x {it.name}</span>
-                                                                                                    <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                                                    <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                                                 </div>
                                                                                             ))}
                                                                                         </div>
@@ -1149,7 +848,7 @@ export default function Financeiro() {
                                     autoFocus
                                     className={`w-full bg-slate-900 border rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-colors mb-4 ${isPasswordError ? 'border-red-500 focus:border-red-500' : 'border-slate-700 focus:border-red-600'}`}
                                 />
-                                {isPasswordError && <p className="text-xs text-red-400 mb-3 -mt-2">Senha incorreta.</p>}
+                                {isPasswordError && <p className="text-xs text-red-400 mb-3 -mt-2">Senha incorreta. Se nunca configurou, crie uma em seu Perfil (canto inferior esquerdo).</p>}
                                 <div className="flex gap-3">
                                     <button onClick={() => setIsPasswordModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl bg-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-600 transition-colors">Cancelar</button>
                                     <button onClick={handleUnlock} className="flex-1 px-4 py-3 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 shadow-lg shadow-red-600/25 transition-all">Desbloquear</button>
@@ -1210,7 +909,7 @@ export default function Financeiro() {
                                     <div className="bg-rose-500/5 border border-rose-500/15 rounded-xl px-4 py-3 mb-5">
                                         <div className="flex items-center justify-between">
                                             <span className="text-xs text-slate-500">Valor a registrar</span>
-                                            <span className="text-base font-bold text-rose-400">- {formatBRL(parseFloat(expenseAmount))}</span>
+                                            <span className="text-base font-bold text-rose-400">- {formatCurrency(parseFloat(expenseAmount))}</span>
                                         </div>
                                     </div>
                                 )}
@@ -1264,7 +963,7 @@ export default function Financeiro() {
                                                             <p className="text-[11px] text-slate-600">{_formatDate(item.data)} {_formatTime(item.data)}</p>
                                                         </div>
                                                     </div>
-                                                    <p className="text-sm font-bold text-red-500 ml-3 flex-shrink-0">{formatBRL(item.valor)}</p>
+                                                    <p className="text-sm font-bold text-red-500 ml-3 flex-shrink-0">{formatCurrency(item.valor)}</p>
                                                 </div>
                                                 {isExpM && (
                                                     <div className="bg-slate-900/50 border-l-2 border-red-600/30 px-5 py-3 mx-2 mb-1 rounded-lg mt-1">
@@ -1276,7 +975,7 @@ export default function Financeiro() {
                                                                         {items.filter(it => it.item_type === 'service').map((it, j) => (
                                                                             <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                                 <span>{it.quantity}x {it.name}</span>
-                                                                                <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                                <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                             </div>
                                                                         ))}
                                                                     </div>
@@ -1287,7 +986,7 @@ export default function Financeiro() {
                                                                         {items.filter(it => it.item_type === 'product').map((it, j) => (
                                                                             <div key={j} className="flex justify-between text-xs text-slate-300 py-0.5">
                                                                                 <span>{it.quantity}x {it.name}</span>
-                                                                                <span className="text-slate-400">{formatBRL(parseFloat(it.price || 0))}</span>
+                                                                                <span className="text-slate-400">{formatCurrency(parseFloat(it.price || 0))}</span>
                                                                             </div>
                                                                         ))}
                                                                     </div>
@@ -1319,10 +1018,24 @@ export default function Financeiro() {
                                     <div className="mt-4 pt-4 border-t border-slate-700/50 flex items-center justify-between">
                                         <span className="text-xs text-slate-500">{detailsModalConfig.data.length} registro{detailsModalConfig.data.length !== 1 ? 's' : ''}</span>
                                         <span className="text-sm font-bold" style={{ color: '#B59410' }}>
-                                            Total: {formatBRL(detailsModalConfig.data.reduce((s, o) => s + (o.valor || 0), 0))}
+                                            Total: {formatCurrency(detailsModalConfig.data.reduce((s, o) => s + (o.valor || 0), 0))}
                                         </span>
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    )
+                }
+                {
+                    confirmModal.open && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+                            <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+                                <h3 className="text-lg font-bold text-slate-100 mb-2">Confirmar Pagamento</h3>
+                                <p className="text-sm text-slate-400 mb-6">Confirma o pagamento de {formatCurrency(confirmModal.targetData?.valorComissao)} para {confirmModal.targetData?.nome}?</p>
+                                <div className="flex gap-3">
+                                    <button onClick={() => setConfirmModal({ open: false, targetData: null })} className="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 font-medium transition-colors">Cancelar</button>
+                                    <button onClick={handleConfirmPayCommission} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-colors">Confirmar</button>
+                                </div>
                             </div>
                         </div>
                     )

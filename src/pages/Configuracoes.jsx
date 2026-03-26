@@ -3,8 +3,8 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useTheme } from '../context/ThemeContext';
 import { useGlobalData } from '../context/GlobalDataContext';
+import { formatCurrency } from '../utils/orderUtils';
 
-const formatBRL = (v) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const TABS = [
     { key: 'geral', label: 'Dados da Barbearia', icon: '🏪' },
@@ -505,7 +505,7 @@ export default function Configuracoes() {
                                                                 {svc.duration_minutes || 30} min
                                                             </span>
                                                         </td>
-                                                        <td className="px-6 py-4 text-right font-semibold text-red-500">{formatBRL(svc.price)}</td>
+                                                        <td className="px-6 py-4 text-right font-semibold text-red-500">{formatCurrency(svc.price)}</td>
                                                     </tr>
                                                 ))
                                             )}

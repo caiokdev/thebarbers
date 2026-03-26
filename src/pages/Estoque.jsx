@@ -5,7 +5,6 @@ import { formatDate, formatTime, getLocalDateISO } from '../utils/dateUtils';
 import { formatCurrency } from '../utils/orderUtils';
 import { useGlobalData } from '../context/GlobalDataContext';
 
-const formatBRL = (v) => formatCurrency(v);
 
 export default function Estoque() {
     const { adminProfile, loading: globalLoading } = useGlobalData();
@@ -512,7 +511,7 @@ export default function Estoque() {
                                                             </span>
                                                         )}
                                                     </td>
-                                                    <td className="px-6 py-4 text-right font-semibold text-slate-200">{formatBRL(p.price)}</td>
+                                                    <td className="px-6 py-4 text-right font-semibold text-slate-200">{formatCurrency(p.price)}</td>
                                                 </tr>
                                             );
                                         })
@@ -551,7 +550,7 @@ export default function Estoque() {
                             {/* Read-only info */}
                             <div className="bg-slate-900/60 rounded-xl px-4 py-3 border border-slate-700/50 mb-2">
                                 <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Preço</p>
-                                <p className="text-sm font-bold text-red-500">{formatBRL(editingProduct.price)}</p>
+                                <p className="text-sm font-bold text-red-500">{formatCurrency(editingProduct.price)}</p>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
