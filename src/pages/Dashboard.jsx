@@ -130,6 +130,55 @@ const ChartModal = ({ open, onClose, data, maxRevenue, title }) => {
     );
 };
 
+const OrderCard = ({ order }) => {
+    const [expanded, setExpanded] = useState(false);
+    
+    return (
+        <div 
+            onClick={() => setExpanded(!expanded)}
+            className="flex flex-col gap-3 p-4 bg-slate-800 hover:bg-slate-700/80 transition-all duration-200 border border-slate-700/80 rounded-2xl relative overflow-hidden group shadow-md shadow-black/10 cursor-pointer"
+        >
+            {/* Decorative line */}
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500/50 group-hover:bg-amber-400 transition-colors" />
+            
+            <div className="flex items-start justify-between pl-2">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-slate-300 font-bold text-lg shadow-inner">
+                        {order.cliente.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <p className="text-sm font-bold text-slate-100 leading-tight">{order.cliente}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Atendido por <span className="text-slate-300 font-semibold">{order.pro}</span></p>
+                    </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                    <span className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold rounded-xl border border-emerald-500/20 shadow-sm leading-none flex items-center">
+                        {order.valor}
+                    </span>
+                </div>
+            </div>
+            
+            <div className="flex items-start justify-between pt-3 border-t border-slate-700/50 pl-2">
+                <div className="flex items-start gap-2 text-[12px] text-slate-300 flex-1 min-w-0 pr-4">
+                    <div className="p-1 bg-slate-900/50 rounded flex-shrink-0 text-slate-500 mt-0.5">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                    </div>
+                    <span className={`font-medium w-full block transition-all duration-300 ${expanded ? '' : 'truncate'}`}>
+                        {order.itens}
+                    </span>
+                </div>
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400 bg-slate-900/40 px-2 py-1 rounded-lg">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        {order.data}
+                    </div>
+                    <svg className={`w-4 h-4 text-slate-500 transition-transform duration-300 ${expanded ? '-rotate-180' : 'rotate-0'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── PÁGINA PRINCIPAL ───
 
 export default function Dashboard() {
@@ -250,6 +299,19 @@ export default function Dashboard() {
                         total: o.valor
                     }))
                 };
+            case 'metaMes':
+                return {
+                    title: 'Comandas Fechadas do Mês',
+                    columns: [], // Not needed, custom layout
+                    data: (data.detalheMetaMesOrders || []).map(o => ({
+                        id: o.id,
+                        data: o.data,
+                        cliente: o.cliente,
+                        pro: o.profissional,
+                        itens: o.itens,
+                        valor: o.valor
+                    }))
+                };
             case 'estoque':
                 return {
                     title: 'Estoque Crítico',
@@ -325,7 +387,6 @@ export default function Dashboard() {
                     sub={`${funnelClosed} de ${funnelTotal} agendados`}
                     badgeColor="amber"
                     progress={parseFloat(conversao)}
-                    onClick={() => openDrawer('conversaoMes')}
                 />
                 <KpiCard
                     icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
@@ -435,13 +496,12 @@ export default function Dashboard() {
             {/* ─── BLOCO 3 : PERFORMANCE FINANCEIRA ─── */}
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <div
-                    className="bg-slate-800 rounded-2xl border border-slate-700 p-6 cursor-pointer hover:bg-slate-700/70 hover:border-slate-600 transition-all duration-200"
-                    onClick={() => setIsChartModalOpen(true)}
+                    className="bg-slate-800 rounded-2xl border border-slate-700 p-6"
                 >
                     <div className="flex items-center justify-between mb-5">
                         <div>
                             <h2 className="text-base font-semibold text-slate-100">Faturamento — 7 dias</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">Visão semanal • Clique para expandir</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Visão semanal</p>
                         </div>
                         <span className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ background: 'rgba(181,148,16,0.15)', color: '#B59410' }}>
                             {formatBRL(last7Days.reduce((s, d) => s + d.value, 0))}
@@ -498,14 +558,27 @@ export default function Dashboard() {
 
             {/* Modals & Drawer */}
             <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={currentDrawer.title || ''}>
-                <DrawerTable
-                    columns={currentDrawer.columns || []}
-                    data={currentDrawer.data || []}
-                    onRowClick={drawerType === 'comandasAbertas' ? (row) => {
-                        setDrawerOpen(false);
-                        if (row._id) navigate(`/pdv/${row._id}`);
-                    } : undefined}
-                />
+                {drawerType === 'metaMes' ? (
+                    <div className="flex flex-col gap-3 pb-6">
+                        {currentDrawer.data.map((order, i) => (
+                            <OrderCard key={order.id || i} order={order} />
+                        ))}
+                        {currentDrawer.data.length === 0 && (
+                            <div className="text-center py-12">
+                                <p className="text-slate-500 text-sm">Nenhuma comanda encontrada.</p>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <DrawerTable
+                        columns={currentDrawer.columns || []}
+                        data={currentDrawer.data || []}
+                        onRowClick={drawerType === 'comandasAbertas' ? (row) => {
+                            setDrawerOpen(false);
+                            if (row._id) navigate(`/pdv/${row._id}`);
+                        } : undefined}
+                    />
+                )}
             </Drawer>
 
             <ChartModal 

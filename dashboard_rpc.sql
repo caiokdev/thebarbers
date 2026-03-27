@@ -78,12 +78,12 @@ BEGIN
         'open', v_open
     );
 
-    -- 3. Faturamento Mês
+    -- 3. Faturamento Mês (Baseado no fechamento real)
     SELECT COALESCE(SUM(total_amount), 0) INTO v_fat_mes
     FROM orders
     WHERE barbershop_id = p_b_id 
       AND status = 'closed'
-      AND scheduled_at >= p_start_month AND scheduled_at <= p_end_month;
+      AND closed_at >= p_start_month AND closed_at <= p_end_month;
 
     -- Faturamento Dia (fechados hoje)
     SELECT COALESCE(SUM(total_amount), 0) INTO v_fat_dia
@@ -92,10 +92,12 @@ BEGIN
       AND status = 'closed'
       AND closed_at >= p_start_today AND closed_at <= p_end_today;
 
-    -- Ticket Médio (All Time Close)
+    -- Ticket Médio do Mês (Baseado no fechamento real)
     SELECT COALESCE(AVG(total_amount), 0) INTO v_ticket_medio
     FROM orders
-    WHERE barbershop_id = p_b_id AND status = 'closed';
+    WHERE barbershop_id = p_b_id 
+      AND status = 'closed'
+      AND closed_at >= p_start_month AND closed_at <= p_end_month;
 
     v_financial := jsonb_build_object(
         'faturamentoMes', v_fat_mes,

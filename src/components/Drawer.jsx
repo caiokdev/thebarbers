@@ -61,11 +61,11 @@ export function DrawerTable({ columns, data, onRowClick }) {
                 <thead>
                     <tr className="border-b border-slate-700">
                         {columns.map((col, i) => (
-                            <th key={i} className="pb-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                            <th key={i} className="pb-4 px-3 text-[11px] font-bold text-slate-400 uppercase tracking-widest">
                                 {col}
                             </th>
                         ))}
-                        {onRowClick && <th className="pb-3 w-8" />}
+                        {onRowClick && <th className="pb-4 px-3 w-8" />}
                     </tr>
                 </thead>
                 <tbody>
@@ -76,8 +76,9 @@ export function DrawerTable({ columns, data, onRowClick }) {
                             title={onRowClick ? 'Clique para fechar a comanda' : undefined}
                             className={`group border-b border-slate-700/50 transition-colors ${onRowClick ? 'cursor-pointer hover:bg-slate-700/50' : 'hover:bg-slate-700/30'}`}
                         >
-                            {Object.entries(row).filter(([k]) => !k.startsWith('_')).map(([, val], j) => (
-                                <td key={j} className="py-3 text-sm text-slate-300">
+                            {Object.entries(row).filter(([k]) => !k.startsWith('_')).map(([k, val], j) => (
+                                <td key={j} className={`py-4 px-3 text-[13px] text-slate-300 ${['data', 'valor', 'hora', 'horario', 'preco', 'vence', 'total'].includes(k) ? 'whitespace-nowrap' : 'min-w-[100px]'}`}>
+
                                     {typeof val === 'string' && val.startsWith('https://wa.me/') ? (
                                         <a
                                             href={val}

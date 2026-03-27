@@ -68,29 +68,7 @@ export default function HistoricoComissoes() {
             if (error) {
                 if (error.code !== '42P01') console.error(error);
             } else {
-                // If professionals(name) is null, it means the ID is in 'profiles' table
-                // We'll perform a fallback lookup for those missing names
-                const updatedData = [...(data || [])];
-                const missingIds = updatedData
-                    .filter(p => !p.professionals?.name && p.professional_id)
-                    .map(p => p.professional_id);
-
-                if (missingIds.length > 0) {
-                    const { data: fallbackPros } = await supabase
-                        .from('profiles')
-                        .select('id, name')
-                        .in('id', missingIds);
-                    
-                    const fallbackMap = {};
-                    (fallbackPros || []).forEach(fp => { fallbackMap[fp.id] = fp.name; });
-
-                    updatedData.forEach(p => {
-                        if (!p.professionals?.name && p.professional_id && fallbackMap[p.professional_id]) {
-                            p.professionals = { name: fallbackMap[p.professional_id] };
-                        }
-                    });
-                }
-                setPayments(updatedData);
+                setPayments(data || []);
             }
         } catch (err) {
             console.error(err);

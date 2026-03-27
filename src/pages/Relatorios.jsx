@@ -177,6 +177,15 @@ export default function Relatorios() {
     const selectedMonth = useMemo(() => parseInt(selectedPeriod.split('-')[1]) - 1, [selectedPeriod]);
     const periodLabel = useMemo(() => `${MONTH_LABELS[selectedMonth]} ${selectedYear}`, [selectedMonth, selectedYear]);
 
+    // Helper to safely open date avoiding timezone shifts if there's no Z
+    const openDateSafely = (dateStr) => {
+        if (!dateStr) return null;
+        if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-')) {
+            return new Date(dateStr + 'Z');
+        }
+        return new Date(dateStr);
+    };
+
     // ── Master fetch ──
     useEffect(() => {
         if (!barbershopId) return;
@@ -328,8 +337,17 @@ export default function Relatorios() {
                 // ═══ KPI: Horário de Pico (usa scheduled_at, fallback created_at) — filtro horário comercial ═══
                 const hourCounts = {};
                 currentMonthOrders.forEach(o => {
-                    const h = parseInt(new Date(o.scheduled_at || o.created_at).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));
-                    if (h >= 8 && h <= 22) {
+                    const dateRaw = o.scheduled_at || o.created_at;
+                    if (!dateRaw) return;
+                    
+                    const dateObj = openDateSafely(dateRaw);
+                    const h = parseInt(dateObj.toLocaleTimeString('pt-BR', { 
+                        timeZone: 'America/Sao_Paulo', 
+                        hour: '2-digit', 
+                        hour12: false 
+                    }));
+
+                    if (h >= 7 && h <= 23) { // Ampliado um pouco o range para segurança
                         hourCounts[h] = (hourCounts[h] || 0) + 1;
                     }
                 });

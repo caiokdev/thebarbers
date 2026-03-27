@@ -47,23 +47,54 @@ export function useFinanceiroData() {
     // Commissions UI State
     const [periodoComissao, setPeriodoComissao] = useState('mes');
 
-    // Dates calculations
-    const [selYear, selMonth] = selectedMonth.split('-');
-    const monthIndex = parseInt(selMonth, 10) - 1;
-    const isCurrentMonth = today.getFullYear() === parseInt(selYear, 10) && today.getMonth() === monthIndex;
+    // Dates calculations memoized to stabilize fetchAll dependencies
+    const {
+        isCurrentMonth,
+        startOfDayISO,
+        endOfDayISO,
+        sevenDaysAgo,
+        startOfMonthISO,
+        endOfMonthISO,
+        selectedMonthLabel,
+        selYear,
+        selMonth
+    } = useMemo(() => {
+        const [y, m] = selectedMonth.split('-');
+        const yInt = parseInt(y, 10);
+        const mIdx = parseInt(m, 10) - 1;
+        const isCurr = today.getFullYear() === yInt && today.getMonth() === mIdx;
 
-    const startOfDayISO = isCurrentMonth ? new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString() : null;
-    const endOfDayISO = isCurrentMonth ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).toISOString() : null;
+        const startOfMonth = new Date(yInt, mIdx, 1).toISOString();
+        const endOfMonth = new Date(yInt, mIdx + 1, 0, 23, 59, 59, 999).toISOString();
 
-    const sevenDaysAgoDate = new Date();
-    sevenDaysAgoDate.setDate(sevenDaysAgoDate.getDate() - 6);
-    sevenDaysAgoDate.setHours(0, 0, 0, 0);
-    const sevenDaysAgo = isCurrentMonth ? sevenDaysAgoDate.toISOString() : null;
+        let startOfDay = null;
+        let endOfDay = null;
+        let s7d = null;
 
-    const startOfMonthISO = new Date(parseInt(selYear, 10), monthIndex, 1).toISOString();
-    const endOfMonthISO = new Date(parseInt(selYear, 10), monthIndex + 1, 0, 23, 59, 59, 999).toISOString();
-    const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-    const selectedMonthLabel = MONTH_NAMES[monthIndex];
+        if (isCurr) {
+            startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+            endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).toISOString();
+            
+            const sevenDaysAgoDate = new Date();
+            sevenDaysAgoDate.setDate(sevenDaysAgoDate.getDate() - 6);
+            sevenDaysAgoDate.setHours(0, 0, 0, 0);
+            s7d = sevenDaysAgoDate.toISOString();
+        }
+
+        const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+        return {
+            isCurrentMonth: isCurr,
+            startOfDayISO: startOfDay,
+            endOfDayISO: endOfDay,
+            sevenDaysAgo: s7d,
+            startOfMonthISO: startOfMonth,
+            endOfMonthISO: endOfMonth,
+            selectedMonthLabel: MONTH_NAMES[mIdx],
+            selYear: y,
+            selMonth: m
+        };
+    }, [selectedMonth, today]);
 
     const fetchAll = useCallback(async () => {
         if (!barbershopId) return;
@@ -76,7 +107,7 @@ export function useFinanceiroData() {
             if (isCurrentMonth) {
                 const { data } = await supabase
                     .from('orders')
-                    .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type), notes')
+                    .select('id, total_amount, closed_at, client_id, professional_id, professionals(name), order_items(name, price, quantity, item_type), notes')
                     .eq('barbershop_id', bId)
                     .eq('status', 'closed')
                     .gte('closed_at', startOfDayISO)
@@ -111,7 +142,7 @@ export function useFinanceiroData() {
             if (isCurrentMonth) {
                 const { data: o7d } = await supabase
                     .from('orders')
-                    .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type), notes')
+                    .select('id, total_amount, closed_at, client_id, professional_id, professionals(name), order_items(name, price, quantity, item_type), notes')
                     .eq('barbershop_id', bId)
                     .eq('status', 'closed')
                     .gte('closed_at', sevenDaysAgo);
@@ -132,7 +163,7 @@ export function useFinanceiroData() {
             // 4. MÊS
             const { data: ordersMes } = await supabase
                 .from('orders')
-                .select('id, total_amount, closed_at, client_id, professional_id, order_items(name, price, quantity, item_type), notes, payment_method, scheduled_at, created_at')
+                .select('id, total_amount, closed_at, client_id, professional_id, professionals(name), order_items(name, price, quantity, item_type), notes, payment_method, scheduled_at, created_at')
                 .eq('barbershop_id', bId)
                 .eq('status', 'closed')
                 .gte('closed_at', startOfMonthISO)
@@ -180,6 +211,7 @@ export function useFinanceiroData() {
                 (clients || []).forEach(c => { clientMap[c.id] = c.name; });
             }
             if (proIds.length > 0) {
+                // Fetch from both tables to bypass potential RLS blocks on either side
                 const [prosRes, profilesProsRes] = await Promise.all([
                     supabase.from('professionals').select('id, name, commission_rate').in('id', proIds),
                     supabase.from('profiles').select('id, name, commission_rate').in('id', proIds)
@@ -188,7 +220,7 @@ export function useFinanceiroData() {
                 const allPros = [...(prosRes.data || []), ...(profilesProsRes.data || [])];
                 allPros.forEach(p => {
                     proMap[p.id] = p.name;
-                    newRateMap[p.id] = p.commission_rate ?? 50;
+                    newRateMap[p.id] = parseFloat(p.commission_rate) || 50;
                 });
                 setRateMap(newRateMap);
             }
@@ -214,7 +246,7 @@ export function useFinanceiroData() {
             setHistoricoComandas(historico.map(o => ({
                 id: o.id,
                 cliente: clientMap[o.client_id] || 'Sem nome',
-                profissional: proMap[o.professional_id] || 'Sem nome',
+                profissional: o.professionals?.name || proMap[o.professional_id] || 'Sem identificação',
                 abertura: o.scheduled_at || o.created_at,
                 fechamento: o.closed_at,
                 valor: parseFloat(o.total_amount || 0),
@@ -256,7 +288,7 @@ export function useFinanceiroData() {
         filteredOrders.forEach(o => {
             const pid = o.professional_id;
             if (!pid) return;
-            if (!grouped[pid]) grouped[pid] = { nome: proMapState[pid] || 'Sem nome', total: 0, orders: [] };
+            if (!grouped[pid]) grouped[pid] = { nome: o.professionals?.name || proMapState[pid] || 'Sem nome', total: 0, orders: [] };
             grouped[pid].total += o.total_amount;
             grouped[pid].orders.push({
                 ...o,

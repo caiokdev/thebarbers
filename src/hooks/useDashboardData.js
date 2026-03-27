@@ -138,7 +138,7 @@ export default function useDashboardData() {
                 // NOTA: dois .or() encadeados criam um AND incorreto — usar um único .or() com todas as condições
                 const { data: rawOrdersData, error: ordersErr } = await supabase
                     .from('orders')
-                    .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone)')
+                    .select('id, status, total_amount, scheduled_at, created_at, closed_at, origin, professionals(name), clients(name, phone), order_items(name, quantity, price, item_type)')
                     .eq('barbershop_id', bId)
                     .or(
                         `scheduled_at.gte.${startOfMonthISO},` +
@@ -322,6 +322,29 @@ export default function useDashboardData() {
                 });
                 proximosAtendimentos.sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
+                // Detalhe Meta Mes — closed orders from current month exclusively
+                // Use America/Sao_Paulo timezone check via getLocalDateISO
+                const allClosedThisMonth = allOrdersRaw.filter(o => {
+                    const isClosed = o.status === 'closed';
+                    const closedAt = o.closed_at ? openDateSafely(o.closed_at) : null;
+                    if (!isClosed || !closedAt) return false;
+                    const dateStr = getLocalDateISO(closedAt);
+                    return dateStr >= startOfMonthStr && dateStr <= endOfMonthStr;
+                });
+
+                const detalheMetaMesOrders = allClosedThisMonth.map(o => {
+                    const itemsDesc = (o.order_items || []).map(it => `${it.quantity}x ${it.name}`).join(', ');
+                    return {
+                        id: o.id,
+                        _dateRaw: o.closed_at,
+                        data: formatDateTime(o.closed_at),
+                        cliente: o.clients?.name || 'Cliente Avulso',
+                        profissional: o.professionals?.name || 'Sem nome',
+                        itens: itemsDesc || '-',
+                        valor: formatCurrency(parseFloat(o.total_amount || 0))
+                    };
+                }).sort((a, b) => new Date(b._dateRaw) - new Date(a._dateRaw));
+
                 // Bug 4 fix: fallback para faturamentoDia se RPC retornou 0
                 // Soma diretamente do raw (total_amount), sem parsing de string formatada
                 if (faturamentoDiaRPC === 0) {
@@ -438,8 +461,8 @@ export default function useDashboardData() {
                 const barberIds = Object.keys(barberMap);
                 let barberNameMap = {};
                 if (barberIds.length > 0) {
-                    const { data: barberProfiles } = await supabase.from('profiles').select('id, name').in('id', barberIds);
-                    (barberProfiles || []).forEach(p => { barberNameMap[p.id] = p.name; });
+                    const { data: barberPros } = await supabase.from('professionals').select('id, name').in('id', barberIds);
+                    (barberPros || []).forEach(p => { barberNameMap[p.id] = p.name; });
                 }
 
                 const rankingBarbeiros = Object.entries(barberMap)
@@ -648,8 +671,8 @@ export default function useDashboardData() {
 
                 let proximoHorarioLivre = '—';
                 const now = new Date();
-                // Define slots: 08:00 to 20:00 every 30 mins
-                for (let h = 8; h <= 20; h++) {
+                // Define slots: 09:00 to 20:00 every 30 mins
+                for (let h = 9; h <= 20; h++) {
                     for (let m of [0, 30]) {
                         if (h === 20 && m === 30) break;
                         const slotDate = new Date(today);
@@ -715,8 +738,8 @@ export default function useDashboardData() {
                     detalheFaturamentoHoje,
                     detalheAtendimentosHoje,
                     detalheComandasAbertas,
-                    detalheConversaoMes,
                     detalheMetaMes,
+                    detalheMetaMesOrders,
                 });
             } catch (err) {
                 console.error('Erro ao buscar dados do dashboard:', err);

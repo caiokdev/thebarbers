@@ -456,7 +456,6 @@ export default function Estoque() {
                                 <thead>
                                     <tr className="border-b border-slate-700">
                                         <th className="text-left px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Produto</th>
-                                        <th className="text-left px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Filial</th>
                                         <th className="text-center px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Estoque Atual</th>
                                         <th className="text-center px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Mínimo</th>
                                         <th className="text-center px-6 py-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Status</th>
@@ -466,7 +465,7 @@ export default function Estoque() {
                                 <tbody>
                                     {filteredProducts.length === 0 ? (
                                         <tr>
-                                            <td colSpan={6} className="px-6 py-12 text-center text-slate-600">
+                                            <td colSpan={5} className="px-6 py-12 text-center text-slate-600">
                                                 {(searchTerm || statusFilter !== 'all') ? 'Nenhum produto encontrado para os filtros selecionados.' : 'Nenhum produto cadastrado.'}
                                             </td>
                                         </tr>
@@ -489,7 +488,6 @@ export default function Estoque() {
                                                             <span className="font-medium text-slate-200">{p.name}</span>
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-4 text-slate-400">{p.branch_name || '—'}</td>
                                                     <td className="px-6 py-4 text-center">
                                                         <span className={`font-bold ${isCritical ? 'text-rose-400' : isLow ? 'text-amber-400' : 'text-slate-200'}`}>
                                                             {p.current_stock}
