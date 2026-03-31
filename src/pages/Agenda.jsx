@@ -291,7 +291,14 @@ export default function Agenda() {
             if (n.includes('barba')) b_refund += itm.quantity;
         });
         if (c_refund > 0 || b_refund > 0) {
-            const { data: sub } = await supabase.from('client_subscriptions').select('*').eq('client_id', clientId).single();
+            const { data: subRecords } = await supabase
+                .from('client_subscriptions')
+                .select('*')
+                .eq('client_id', clientId)
+                .eq('status', 'active')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            const sub = subRecords && subRecords.length > 0 ? subRecords[0] : null;
             if (sub) {
                 await supabase.from('client_subscriptions').update({
                     haircuts_used: Math.max(0, (sub.haircuts_used || 0) - c_refund),
@@ -524,6 +531,8 @@ function AppointmentModal({
 
     const [clientSub, setClientSub] = useState(null);
     const [subLoading, setSubLoading] = useState(false);
+    const [isSyncError, setIsSyncError] = useState(false);
+    const [showPlanWarningModal, setShowPlanWarningModal] = useState(false);
 
     const filteredClients = useMemo(() => {
         if (!clientSearch.trim()) return clients.slice(0, 8);
@@ -536,13 +545,30 @@ function AppointmentModal({
         const clientObj = clients.find(c => c.id === clientId);
         if (!clientObj?.is_subscriber) { setClientSub(null); return; }
         setSubLoading(true);
-        supabase.from('client_subscriptions').select('*, plans(name, haircut_limit, shave_limit)').eq('client_id', clientId).single()
-            .then(async ({ data }) => {
-                if (data && !data.plans && data.plan_id) {
-                    const { data: planData } = await supabase.from('plans').select('name, haircut_limit, shave_limit').eq('id', data.plan_id).single();
-                    if (planData) data.plans = planData;
+        setIsSyncError(false);
+        supabase.from('client_subscriptions')
+            .select('*, plans(name, haircut_limit, shave_limit, allowed_days)')
+            .eq('client_id', clientId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .then(async ({ data: records }) => {
+                let subData = records && records.length > 0 ? records[0] : null;
+                
+                if (subData && !subData.plans && subData.plan_id) {
+                    const { data: planData } = await supabase.from('plans').select('name, haircut_limit, shave_limit, allowed_days').eq('id', subData.plan_id).maybeSingle();
+                    if (planData) subData.plans = planData;
                 }
-                setClientSub(data || null); setSubLoading(false);
+                
+                if (!subData && clientObj?.is_subscriber) {
+                    setIsSyncError(true);
+                }
+                
+                setClientSub(subData || null); 
+                setSubLoading(false);
+            }).catch(err => {
+                console.error('Error fetching subscription:', err);
+                setSubLoading(false);
             });
     }, [clientId, clients]);
 
@@ -568,15 +594,21 @@ function AppointmentModal({
             const isShave = n.includes('barba');
             if (isHaircut) {
                 const limit = clientSub.plans?.haircut_limit ?? 999;
-                if (limit === 0) { toast.error(`❌ Corte não incluso.`); setCatalogSelect(''); return; }
                 const used = cartItems.filter(ci => ci.type === 'service' && (ci.name.toLowerCase().includes('corte') || ci.name.toLowerCase().includes('cabelo'))).reduce((s, ci) => s + ci.quantity, 0);
-                if ((clientSub.haircuts_used || 0) + used >= limit) { toast.error(`❌ Limite de cortes atingido.`); setCatalogSelect(''); return; }
+                if (limit === 0) {
+                    toast.warning(`Corte não incluso no plano. Será cobrado à parte.`);
+                } else if ((clientSub.haircuts_used || 0) + used >= limit) {
+                    toast.warning(`Limite de cortes do plano atingido. Será cobrado à parte.`);
+                }
             }
             if (isShave) {
                 const limit = clientSub.plans?.shave_limit ?? 999;
-                if (limit === 0) { toast.error(`❌ Barba não inclusa.`); setCatalogSelect(''); return; }
                 const used = cartItems.filter(ci => ci.type === 'service' && ci.name.toLowerCase().includes('barba')).reduce((s, ci) => s + ci.quantity, 0);
-                if ((clientSub.shaves_used || 0) + used >= limit) { toast.error(`❌ Limite de barbas atingido.`); setCatalogSelect(''); return; }
+                if (limit === 0) {
+                    toast.warning(`Barba não inclusa no plano. Será cobrado à parte.`);
+                } else if ((clientSub.shaves_used || 0) + used >= limit) {
+                    toast.warning(`Limite de barbas do plano atingido. Será cobrado à parte.`);
+                }
             }
         }
 
@@ -604,7 +636,14 @@ function AppointmentModal({
     const selectClient = async (c) => {
         setClientId(c.id); setClientSearch(c.name); setShowClientDropdown(false);
         if (c.is_subscriber) {
-            const { data: sub } = await supabase.from('client_subscriptions').select('*, plans(haircut_limit, shave_limit)').eq('client_id', c.id).single();
+            const { data: subRecords } = await supabase
+                .from('client_subscriptions')
+                .select('*, plans(haircut_limit, shave_limit)')
+                .eq('client_id', c.id)
+                .eq('status', 'active')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            const sub = subRecords && subRecords.length > 0 ? subRecords[0] : null;
             if (sub) {
                 let remainC = (sub.plans?.haircut_limit ?? 999) - (sub.haircuts_used || 0);
                 let remainB = (sub.plans?.shave_limit ?? 999) - (sub.shaves_used || 0);
@@ -618,9 +657,10 @@ function AppointmentModal({
         }
     };
 
-    const handleSave = async () => {
+    const handleSave = async (forceSubmit = false) => {
         if (!professionalId || !date || !time) { toast.error('Preencha os campos obrigatórios.'); return; }
         if (!isAvulso && !clientId) { toast.error('Selecione um cliente ou marque Serviço Avulso.'); return; }
+        if (clientId && subLoading) { toast.error('Carregando dados da assinatura...'); return; }
 
         const [y, mo, d] = date.split('-').map(Number);
         const [h, mi] = time.split(':').map(Number);
@@ -633,6 +673,18 @@ function AppointmentModal({
         });
         if (conflict) { toast.error('Este profissional já possui um agendamento neste horário.'); return; }
 
+        let isOutsidePlan = false;
+        if (!isAvulso && clientId) {
+            const dayOfWeek = localDate.getDay();
+            if (clientSub?.plans?.allowed_days && dayOfWeek !== undefined && !clientSub.plans.allowed_days.includes(dayOfWeek)) {
+                isOutsidePlan = true;
+                if (forceSubmit !== true) {
+                    setShowPlanWarningModal(true);
+                    return;
+                }
+            }
+        }
+
         setSaving(true);
         try {
             const { data: order, error } = await supabase.from('orders').insert({ barbershop_id: barbershopId, professional_id: professionalId, client_id: clientId || null, scheduled_at: localDate.toISOString(), total_amount: parseFloat(totalAmount), status: 'scheduled', origin, ...(isAvulso && avulsoNotes ? { notes: avulsoNotes } : {}) }).select('id').single();
@@ -641,16 +693,27 @@ function AppointmentModal({
             if (!isAvulso && cartItems.length > 0 && order?.id) {
                 await supabase.from('order_items').insert(cartItems.map(ci => ({ order_id: order.id, item_type: ci.type, name: ci.name, quantity: ci.quantity, price: ci.price })));
                 const clientObj = clients.find(c => c.id === clientId);
-                if (clientObj?.is_subscriber) {
+                if (clientObj?.is_subscriber && !isOutsidePlan) {
                     let cu = 0, bu = 0;
                     cartItems.forEach(ci => {
                         if (ci.name.toLowerCase().includes('corte') || ci.name.toLowerCase().includes('cabelo')) cu += ci.quantity;
                         if (ci.name.toLowerCase().includes('barba')) bu += ci.quantity;
                     });
                     if (cu > 0 || bu > 0) {
-                        const { data: sub } = await supabase.from('client_subscriptions').select('*, plans(haircut_limit, shave_limit)').eq('client_id', clientId).single();
+                        const { data: subRecords } = await supabase
+                            .from('client_subscriptions')
+                            .select('*, plans(haircut_limit, shave_limit)')
+                            .eq('client_id', clientId)
+                            .eq('status', 'active')
+                            .order('created_at', { ascending: false })
+                            .limit(1);
+                        const sub = subRecords && subRecords.length > 0 ? subRecords[0] : null;
+
                         if (sub) {
-                            await supabase.from('client_subscriptions').update({ haircuts_used: (sub.haircuts_used || 0) + (sub.plans?.haircut_limit > 0 ? cu : 0), shaves_used: (sub.shaves_used || 0) + (sub.plans?.shave_limit > 0 ? bu : 0) }).eq('id', sub.id);
+                            await supabase.from('client_subscriptions').update({ 
+                                haircuts_used: (sub.haircuts_used || 0) + (sub.plans?.haircut_limit > 0 ? cu : 0), 
+                                shaves_used: (sub.shaves_used || 0) + (sub.plans?.shave_limit > 0 ? bu : 0) 
+                            }).eq('id', sub.id);
                         }
                     }
                 }
@@ -696,6 +759,21 @@ function AppointmentModal({
                                 ★ {clientSub.plans?.name}: C: {clientSub.haircuts_used}/{clientSub.plans?.haircut_limit} · B: {clientSub.shaves_used}/{clientSub.plans?.shave_limit}
                             </div>
                         )}
+                        {clientId && clientSub && clientSub.plans?.allowed_days && !clientSub.plans.allowed_days.includes(new Date(date + 'T12:00:00').getDay()) && (
+                            <div className="mt-2 text-[11px] text-amber-400 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20 flex items-center gap-2 font-bold uppercase tracking-tight">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                Fora dos dias do plano (Cobrança à parte)
+                            </div>
+                        )}
+                        {clientId && !subLoading && isSyncError && (
+                            <div className="mt-2 text-[11px] text-rose-400 bg-rose-500/10 p-3 rounded-lg border border-rose-500/20 flex flex-col gap-1">
+                                <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                    Atenção: Assinatura não sincronizada
+                                </div>
+                                <p className="opacity-80">O registro detalhado deste assinante não foi encontrado. Por favor, re-vincule o plano na aba de Planos para restaurar o controle de serviços.</p>
+                            </div>
+                        )}
                     </div>
                     <div>
                         <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">Origem</label>
@@ -736,11 +814,33 @@ function AppointmentModal({
                 </div>
                 <div className="flex gap-3 mt-6">
                     <button onClick={onClose} className="flex-1 py-3 bg-slate-700 rounded-xl text-slate-100 font-semibold transition-colors hover:bg-slate-600">Cancelar</button>
-                    <button onClick={handleSave} disabled={saving} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-semibold transition-colors hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                    <button onClick={() => handleSave()} disabled={saving} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-semibold transition-colors hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
                         {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />} {saving ? 'Salvando...' : 'Confirmar'}
                     </button>
                 </div>
             </div>
+
+            {/* Warning Modal */}
+            {showPlanWarningModal && (
+                <div className="absolute inset-0 z-[60] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowPlanWarningModal(false)}></div>
+                    <div className="relative bg-slate-800 border border-slate-700 rounded-3xl w-full max-w-sm p-8 shadow-2xl flex flex-col items-center text-center animate-in fade-in zoom-in duration-200">
+                        <div className="w-20 h-20 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-6 ring-8 ring-amber-500/5">
+                            <svg className="w-10 h-10 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2 italic">Atenção ao Plano</h3>
+                        <p className="text-sm text-slate-400 mb-8 leading-relaxed">
+                            Este agendamento está <strong className="text-slate-200 border-b border-amber-500/50">fora dos dias cobertos</strong> pelo plano. O serviço deverá ser cobrado separadamente. 
+                        </p>
+                        <div className="flex w-full gap-3">
+                            <button onClick={() => setShowPlanWarningModal(false)} className="flex-1 py-3.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-semibold transition-colors">Cancelar</button>
+                            <button onClick={() => { setShowPlanWarningModal(false); handleSave(true); }} className="flex-1 py-3.5 rounded-xl text-white text-sm font-bold transition-all bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 uppercase tracking-tight">Continuar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

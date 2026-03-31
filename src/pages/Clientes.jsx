@@ -139,6 +139,20 @@ export default function Clientes() {
             fetchClientes();
             refreshData();
             
+            if (newIsSub && newSelectedPlanId) {
+                const validUntil = new Date();
+                validUntil.setDate(validUntil.getDate() + 30);
+                await supabase.from('client_subscriptions').insert({
+                    client_id: newClientData.id,
+                    plan_id: newSelectedPlanId,
+                    status: 'active',
+                    haircuts_used: 0,
+                    shaves_used: 0,
+                    valid_until: validUntil.toISOString(),
+                    payment_method: 'PIX'
+                });
+            }
+            
             // If subscribed, try to trigger Celcoin (if card info provided)
             if (newIsSub && cardInfo.number) {
                  const { data: { session } } = await supabase.auth.getSession();
@@ -246,6 +260,8 @@ export default function Clientes() {
                 .update({ is_subscriber: false, subscription_status: 'none' })
                 .eq('id', clientId);
             if (error) throw error;
+            
+            await supabase.from('client_subscriptions').delete().eq('client_id', clientId);
 
             toast.success('Assinatura removida.');
             setProfileModal(prev => ({
@@ -273,6 +289,21 @@ export default function Clientes() {
 
             toast.success('Plano vinculado com sucesso!');
             setPlanPickerModal(null);
+
+            const validUntil = new Date();
+            validUntil.setDate(validUntil.getDate() + 30);
+            // Delete any old subscription records before inserting new one
+            await supabase.from('client_subscriptions').delete().eq('client_id', clientId);
+            const { error: subErr } = await supabase.from('client_subscriptions').insert({
+                client_id: clientId,
+                plan_id: newSelectedPlanId,
+                status: 'active',
+                haircuts_used: 0,
+                shaves_used: 0,
+                valid_until: validUntil.toISOString(),
+                payment_method: 'PIX'
+            });
+            if (subErr) throw subErr;
             
             // If card info provided, try to trigger Celcoin
             if (cardInfo.number) {
@@ -317,7 +348,7 @@ export default function Clientes() {
                 .update({ status: newStatus })
                 .eq('client_id', clientId);
             // Non-blocking error check for subscription table
-            if (subErr) console.warn('Aviso: Tabela client_subscriptions não atualizada:', subErr.message);
+            if (subErr) console.warn('Aviso: Tabela subscriptions não atualizada:', subErr.message);
 
             toast.success(`Status alterado para ${newStatus === 'active' ? 'Em dia' : 'Atrasado'}`);
             setProfileModal(prev => 

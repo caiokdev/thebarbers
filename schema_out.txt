@@ -1,0 +1,457 @@
+﻿=== client_subscriptions COLUMNS ===
+[
+  'id',
+  'client_id',
+  'plan_id',
+  'status',
+  'haircuts_used',
+  'shaves_used',
+  'valid_until',
+  'created_at',
+  'updated_at',
+  'celcoin_subscription_id',
+  'payment_method'
+]
+
+=== subscriptions COLUMNS ===
+EMPTY TABLE
+
+=== caio client record ===
+[
+  {
+    "id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "name": "caio",
+    "is_subscriber": true,
+    "subscription_status": "active"
+  }
+]
+
+=== caio client_subscriptions ===
+[
+  {
+    "id": "232c91f3-8068-4e2d-b3c2-400c847bf7be",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 2,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:50:46.198+00:00",
+    "created_at": "2026-03-31T05:50:38.52264+00:00",
+    "updated_at": "2026-03-31T05:50:38.52264+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "1426c829-bc4b-4aa0-9dbc-bd7e6e2cf024",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:54:56.867+00:00",
+    "created_at": "2026-03-31T05:54:49.1466+00:00",
+    "updated_at": "2026-03-31T05:54:49.1466+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "ea14a673-77b8-4d9d-b518-8f99faa02175",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:27.118+00:00",
+    "created_at": "2026-03-31T05:55:19.385796+00:00",
+    "updated_at": "2026-03-31T05:55:19.385796+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "a6cedd97-626b-4f4d-93d7-530164a43de4",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:31.128+00:00",
+    "created_at": "2026-03-31T05:55:23.365333+00:00",
+    "updated_at": "2026-03-31T05:55:23.365333+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "c3351a3e-3d7a-4d49-be98-9c4f8eed4592",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:36.019+00:00",
+    "created_at": "2026-03-31T05:55:28.286231+00:00",
+    "updated_at": "2026-03-31T05:55:28.286231+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "f264599f-1d4f-458f-ae5a-7a53b57e4b85",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:48.15+00:00",
+    "created_at": "2026-03-31T05:55:40.386206+00:00",
+    "updated_at": "2026-03-31T05:55:40.386206+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "c654ed42-9971-4cd2-bd6f-81839e45c518",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:48.77+00:00",
+    "created_at": "2026-03-31T05:55:41.001023+00:00",
+    "updated_at": "2026-03-31T05:55:41.001023+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "96384920-bfc9-44fd-a5c5-d6df025a655e",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "75fb65b4-3ca1-4855-9540-559fe7ab89c2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:49.519+00:00",
+    "created_at": "2026-03-31T05:55:41.752983+00:00",
+    "updated_at": "2026-03-31T05:55:41.752983+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "1e642ec4-a6b3-4b56-a4d8-2d3c86cd99ff",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "28d61d8d-1117-494e-9d97-a20d75cb29e2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:49.98+00:00",
+    "created_at": "2026-03-31T05:55:42.219637+00:00",
+    "updated_at": "2026-03-31T05:55:42.219637+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "f60c7066-7664-4d0d-983f-aaa74eadff90",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "76bd1220-8a76-4697-b0a4-b9d10e6e81a7",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:50.44+00:00",
+    "created_at": "2026-03-31T05:55:42.672848+00:00",
+    "updated_at": "2026-03-31T05:55:42.672848+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "caf6a0d1-d26c-45fb-b788-531f52e8182f",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T05:55:50.961+00:00",
+    "created_at": "2026-03-31T05:55:43.202296+00:00",
+    "updated_at": "2026-03-31T05:55:43.202296+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "df280ba7-57eb-4c99-ab86-13fedaf02709",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:08:42.532+00:00",
+    "created_at": "2026-03-31T06:08:34.797202+00:00",
+    "updated_at": "2026-03-31T06:08:34.797202+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "6d3ee4b1-d1c9-4408-9379-0644641cb940",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:09:32.149+00:00",
+    "created_at": "2026-03-31T06:09:24.787036+00:00",
+    "updated_at": "2026-03-31T06:09:24.787036+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "8418aab0-78ef-4fe7-9bbf-c71fca8478db",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:09:55.337+00:00",
+    "created_at": "2026-03-31T06:09:47.560066+00:00",
+    "updated_at": "2026-03-31T06:09:47.560066+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "df156188-ff04-401b-aaff-23f70943329b",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:10:17.788+00:00",
+    "created_at": "2026-03-31T06:10:10.061544+00:00",
+    "updated_at": "2026-03-31T06:10:10.061544+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "aa25c841-acf5-4f6a-9d20-fddff5ad3dbf",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:13:18.17+00:00",
+    "created_at": "2026-03-31T06:13:10.482264+00:00",
+    "updated_at": "2026-03-31T06:13:10.482264+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "9c5b6a4d-5607-48a1-9663-c327c0132b22",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:13:37.218+00:00",
+    "created_at": "2026-03-31T06:13:30.540649+00:00",
+    "updated_at": "2026-03-31T06:13:30.540649+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "4c003204-f4a3-4f00-a3fc-d625b1804137",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:13:55.607+00:00",
+    "created_at": "2026-03-31T06:13:47.847934+00:00",
+    "updated_at": "2026-03-31T06:13:47.847934+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "c598d68b-5e0e-4c4d-93a9-7f7490165e30",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:16:07.963+00:00",
+    "created_at": "2026-03-31T06:16:00.164304+00:00",
+    "updated_at": "2026-03-31T06:16:00.164304+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "e996ec8b-c6af-4047-98b0-256e9467edcb",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:16:33.288+00:00",
+    "created_at": "2026-03-31T06:16:25.659499+00:00",
+    "updated_at": "2026-03-31T06:16:25.659499+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "58b95d81-8921-473e-9842-1ffbdede7118",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:17:57.554+00:00",
+    "created_at": "2026-03-31T06:17:49.652399+00:00",
+    "updated_at": "2026-03-31T06:17:49.652399+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "ebba2074-fb64-462a-8e5d-777dc597c61a",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:17:59.143+00:00",
+    "created_at": "2026-03-31T06:17:51.242707+00:00",
+    "updated_at": "2026-03-31T06:17:51.242707+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  },
+  {
+    "id": "703aa645-ed86-41da-94c7-b4be23c07bbd",
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active",
+    "haircuts_used": 0,
+    "shaves_used": 0,
+    "valid_until": "2026-04-30T06:17:59.803+00:00",
+    "created_at": "2026-03-31T06:17:51.901546+00:00",
+    "updated_at": "2026-03-31T06:17:51.901546+00:00",
+    "celcoin_subscription_id": null,
+    "payment_method": "PIX"
+  }
+]
+
+=== caio subscriptions ===
+[]
+
+=== ALL subscribers ===
+[
+  "caio"
+]
+
+=== ALL client_subscriptions ===
+[
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "75fb65b4-3ca1-4855-9540-559fe7ab89c2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "28d61d8d-1117-494e-9d97-a20d75cb29e2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "76bd1220-8a76-4697-b0a4-b9d10e6e81a7",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "b9d3c02b-5415-4f6a-a9ad-e3a436ea3461",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "e4ab5f21-0d9e-4b61-8823-97fd336b04d2",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  },
+  {
+    "client_id": "0cca9c7b-5e7b-441d-9bc7-099720ae6979",
+    "plan_id": "af2e3f26-878b-4e8f-858a-4cc466e6d69f",
+    "status": "active"
+  }
+]

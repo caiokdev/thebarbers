@@ -55,6 +55,9 @@ export default function AgendamentoPublico() {
     // ── Success ──
     const [success, setSuccess] = useState(false);
 
+    // ── Subscription Warning ──
+    const [showPlanWarningModal, setShowPlanWarningModal] = useState(false);
+
     // ── Total ──
     const totalAmount = useMemo(() => selectedServices.reduce((s, svc) => s + (svc.price || 0), 0), [selectedServices]);
     const totalDuration = useMemo(() => selectedServices.reduce((s, svc) => s + (svc.duration_minutes || 30), 0), [selectedServices]);
@@ -205,24 +208,53 @@ export default function AgendamentoPublico() {
     }, [selectedDate, busySlots, totalDuration]);
 
     // ════════════════ SUBMIT ════════════════
-    const handleSubmit = async () => {
+    const handleSubmit = async (e, forceSubmit = false) => {
+        if (e && e.preventDefault) e.preventDefault();
+        
         if (!clientName.trim() || !clientPhone.trim()) {
             toast.error('Preencha seu nome e WhatsApp.');
             return;
         }
         setSaving(true);
         try {
-            // 1) Upsert client by phone
-            let clientId = null;
             const phoneClean = clientPhone.replace(/\D/g, '');
-            const { data: existingClient } = await supabase
+
+            // 0) Verify Plan & Allowed Days limits BEFORE creating order
+            let isOutsidePlan = false;
+            let existingClient = await supabase
                 .from('clients')
-                .select('id')
+                .select('id, name, is_subscriber')
                 .eq('barbershop_id', barbershopId)
                 .eq('phone', phoneClean)
                 .limit(1)
-                .maybeSingle();
+                .maybeSingle()
+                .then(res => res.data);
 
+            if (existingClient?.is_subscriber) {
+                const { data: subRecords } = await supabase
+                    .from('client_subscriptions')
+                    .select('*, plans(allowed_days)')
+                    .eq('client_id', existingClient.id)
+                    .eq('status', 'active')
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                const sub = subRecords && subRecords.length > 0 ? subRecords[0] : null;
+                
+                if (sub?.plans?.allowed_days) {
+                    const dayOfWeek = selectedDate?.date?.getDay();
+                    if (dayOfWeek !== undefined && !sub.plans.allowed_days.includes(dayOfWeek)) {
+                        isOutsidePlan = true;
+                        if (!forceSubmit) {
+                            setSaving(false);
+                            setShowPlanWarningModal(true);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // 1) Upsert client by phone
+            let clientId = null;
             if (existingClient) {
                 clientId = existingClient.id;
                 // Update name and birth date if provided
@@ -300,22 +332,33 @@ export default function AgendamentoPublico() {
                 if (itemsError) throw itemsError;
 
                 // ── DEDUCT Subscription Usages ──
-                const { data: clientObj } = await supabase.from('clients').select('is_subscriber').eq('id', clientId).single();
-                if (clientObj?.is_subscriber) {
-                    let cortes_used = 0, barbas_used = 0;
-                    selectedServices.forEach(svc => {
-                        const n = (svc.name || '').toLowerCase();
-                        if (n.includes('corte') || n.includes('cabelo')) cortes_used += 1;
-                        if (n.includes('barba')) barbas_used += 1;
-                    });
-                    
-                    if (cortes_used > 0 || barbas_used > 0) {
-                        const { data: sub } = await supabase.from('client_subscriptions').select('*').eq('client_id', clientId).single();
-                        if (sub) {
-                            await supabase.from('client_subscriptions').update({
-                                haircuts_used: (sub.haircuts_used || 0) + cortes_used,
-                                shaves_used: (sub.shaves_used || 0) + barbas_used
-                            }).eq('id', sub.id);
+                if (!isOutsidePlan) {
+                    // Re-check client details just in case it's a new sub
+                    const { data: clientObj } = await supabase.from('clients').select('is_subscriber').eq('id', clientId).single();
+                    if (clientObj?.is_subscriber) {
+                        let cortes_used = 0, barbas_used = 0;
+                        selectedServices.forEach(svc => {
+                            const n = (svc.name || '').toLowerCase();
+                            if (n.includes('corte') || n.includes('cabelo')) cortes_used += 1;
+                            if (n.includes('barba')) barbas_used += 1;
+                        });
+                        
+                        if (cortes_used > 0 || barbas_used > 0) {
+                            const { data: subRecords } = await supabase
+                                .from('client_subscriptions')
+                                .select('*')
+                                .eq('client_id', clientId)
+                                .eq('status', 'active')
+                                .order('created_at', { ascending: false })
+                                .limit(1);
+                            const sub = subRecords && subRecords.length > 0 ? subRecords[0] : null;
+
+                            if (sub) {
+                                await supabase.from('client_subscriptions').update({
+                                    haircuts_used: (sub.haircuts_used || 0) + cortes_used,
+                                    shaves_used: (sub.shaves_used || 0) + barbas_used
+                                }).eq('id', sub.id);
+                            }
                         }
                     }
                 }
@@ -788,6 +831,42 @@ export default function AgendamentoPublico() {
                     </div>
                 )}
             </div>
+
+            {/* ── Warning Modal (Outside Plan Days) ── */}
+            {showPlanWarningModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowPlanWarningModal(false)}></div>
+                    <div className="relative bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl flex flex-col items-center text-center animate-in fade-in zoom-in duration-200">
+                        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mb-4">
+                            <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">Atenção ao seu Plano</h3>
+                        <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+                            Este agendamento está <strong className="text-slate-700">fora dos dias cobertos pelo seu plano</strong>. O serviço deverá ser cobrado separadamente. Deseja continuar?
+                        </p>
+                        <div className="flex w-full gap-3">
+                            <button
+                                onClick={() => setShowPlanWarningModal(false)}
+                                className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-semibold transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowPlanWarningModal(false);
+                                    handleSubmit(null, true);
+                                }}
+                                className="flex-1 py-3.5 rounded-xl text-white text-sm font-bold transition-all"
+                                style={{ backgroundColor: theme.primary }}
+                            >
+                                Continuar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
