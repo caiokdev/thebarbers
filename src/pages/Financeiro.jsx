@@ -561,10 +561,18 @@ export default function Financeiro() {
                                                                         ✓ Marcar como Pago
                                                                     </button>
                                                                 </div>
-                                                                <div className="flex items-center justify-between pl-6">
-                                                                    <span className="text-[11px] text-slate-500">Produção Bruta: {formatCurrency(b.totalGerado)}</span>
+                                                                <div className="flex items-center justify-between pl-6 mt-1">
+                                                                    <div className="flex flex-col gap-0.5">
+                                                                        <span className="text-[11px] text-slate-500">Produção Bruta: {formatCurrency(b.totalGerado)}</span>
+                                                                        <span className="text-[11px] text-slate-500">Comissão Total: {formatCurrency(b.valorComissaoTotal)}</span>
+                                                                    </div>
                                                                     <div className="flex items-center gap-1.5">
-                                                                        <span className="text-sm font-bold" style={{ color: '#B59410' }}>Comissão ({b.rate}%): {formatCurrency(b.valorComissao)}</span>
+                                                                        {b.valorPago > 0 && (
+                                                                            <span className="text-xs text-green-500 font-medium mr-2">Já pago: {formatCurrency(b.valorPago)}</span>
+                                                                        )}
+                                                                        <span className="text-sm font-bold" style={{ color: '#B59410' }}>
+                                                                            {b.valorPago > 0 ? 'Restante (' : 'Comissão ('}{b.rate}%): {formatCurrency(b.valorComissao)}
+                                                                        </span>
                                                                         <button onClick={(e) => { e.stopPropagation(); handleEditRate(b.id, b.nome); }} className="text-slate-500 hover:text-amber-400 transition-colors" title="Editar taxa">
                                                                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
@@ -622,9 +630,16 @@ export default function Financeiro() {
                                                                                                 <td className="px-3 py-2.5 font-medium">{order.cliente || order.id.split('-')[0]}</td>
                                                                                                 <td className="px-3 py-2.5 text-[11px] text-slate-400 leading-tight pr-4">{itemsDesc || '-'}</td>
                                                                                                 <td className="px-3 py-2.5 text-center">
-                                                                                                    <span className="px-1.5 py-0.5 bg-slate-800 rounded font-medium text-[10px] text-slate-300 border border-slate-700/50">
-                                                                                                        {payLabels[order.payment_method] || order.payment_method || '-'}
-                                                                                                    </span>
+                                                                                                    <div className="flex flex-col items-center gap-1">
+                                                                                                        <span className="px-1.5 py-0.5 bg-slate-800 rounded font-medium text-[10px] text-slate-300 border border-slate-700/50">
+                                                                                                            {payLabels[order.payment_method] || order.payment_method || '-'}
+                                                                                                        </span>
+                                                                                                        {(order.notes || '').includes('[PAID]') && (
+                                                                                                            <span className="px-1.5 py-0.5 rounded font-bold text-[9px] uppercase tracking-wider bg-green-500/10 text-green-400 border border-green-500/20">
+                                                                                                                Pago
+                                                                                                            </span>
+                                                                                                        )}
+                                                                                                    </div>
                                                                                                 </td>
                                                                                                 <td className="px-3 py-2.5 text-right font-bold" style={{ color: '#B59410' }}>
                                                                                                     {formatCurrency(comVal)}

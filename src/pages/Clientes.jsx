@@ -609,7 +609,7 @@ export default function Clientes() {
                                         type="text"
                                         placeholder="(00) 00000-0000"
                                         value={newPhone}
-                                        onChange={e => setNewPhone(e.target.value)}
+                                        onChange={e => { let val = e.target.value.replace(/\D/g, ''); if (val.length > 11) val = val.slice(0, 11); if (val.length > 7) { val = `(${val.slice(0,2)}) ${val.slice(2,7)}-${val.slice(7)}`; } else if (val.length > 2) { val = `(${val.slice(0,2)}) ${val.slice(2)}`; } setNewPhone(val); }}
                                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-red-600 transition-colors"
                                     />
                                 </div>

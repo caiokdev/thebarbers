@@ -504,7 +504,7 @@ export default function Estoque() {
                                                                 Baixo
                                                             </span>
                                                         ) : (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-red-600/10 text-red-500 ring-1 ring-inset ring-red-600/20">
+                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
                                                                 OK
                                                             </span>
                                                         )}

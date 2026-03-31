@@ -630,10 +630,10 @@ export default function Dashboard() {
                 <OrderDetailsModal
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
-                    onDelete={handleDeleteOrder}
-                    onCancel={handleCancelOrder}
-                    onNoShow={handleNoShowOrder}
-                    onOpenComanda={handleOpenComanda}
+                    onDelete={(o) => handleDeleteOrder(o?.id || o?._id)}
+                    onCancel={(o) => handleCancelOrder(o?.id || o?._id)}
+                    onNoShow={(o) => handleNoShowOrder(o?.id || o?._id)}
+                    onOpenComanda={(o) => handleOpenComanda(o?.id || o?._id)}
                 />
             )}
         </div>

@@ -36,6 +36,7 @@ export default function Configuracoes() {
     const barbershopId = adminProfile?.barbershopId;
     const [activeTab, setActiveTab] = useState('geral');
     const [loading, setLoading] = useState(true);
+    const [isInitialized, setIsInitialized] = useState(false);
 
     const [shopData, setShopData] = useState({ name: '', address: '', phone: '', logo: '' });
     const [savingShop, setSavingShop] = useState(false);
@@ -60,7 +61,7 @@ export default function Configuracoes() {
 
     // ── Init ──
     useEffect(() => {
-        if (adminProfile) {
+        if (adminProfile && !isInitialized) {
             const localLogo = localStorage.getItem('shop_logo') || '';
             setShopData({ 
                 name: adminProfile.barbershopName || '', 
@@ -68,11 +69,12 @@ export default function Configuracoes() {
                 phone: adminProfile.barbershopPhone || '', 
                 logo: localLogo 
             });
+            setIsInitialized(true);
             setLoading(false);
-        } else if (!globalLoading) {
+        } else if (!globalLoading && !isInitialized) {
             setLoading(false);
         }
-    }, [adminProfile, globalLoading]);
+    }, [adminProfile, globalLoading, isInitialized]);
 
     // ── Fetch all data when barbershopId is ready ──
     const fetchAll = useCallback(async () => {
@@ -147,9 +149,40 @@ export default function Configuracoes() {
     const handleLogoUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
+
         const reader = new FileReader();
-        reader.onloadend = () => {
-            setShopData(prev => ({ ...prev, logo: reader.result }));
+        reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                const MAX_SIZE = 400;
+                
+                if (width > height) {
+                    if (width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    }
+                } else {
+                    if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                
+                setShopData(prev => ({ ...prev, logo: compressedDataUrl }));
+                
+                // Limpa APÓS carregar para não abortar a leitura do blob!
+                e.target.value = '';
+            };
+            img.src = event.target.result;
         };
         reader.readAsDataURL(file);
     };
@@ -340,7 +373,7 @@ export default function Configuracoes() {
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Telefone / WhatsApp</label>
-                                        <input type="text" value={shopData.phone} onChange={e => setShopData(p => ({ ...p, phone: e.target.value }))}
+                                        <input type="text" value={shopData.phone} onChange={e => { let val = e.target.value.replace(/\D/g, ''); if (val.length > 11) val = val.slice(0, 11); if (val.length > 7) { val = `(${val.slice(0,2)}) ${val.slice(2,7)}-${val.slice(7)}`; } else if (val.length > 2) { val = `(${val.slice(0,2)}) ${val.slice(2)}`; } setShopData(p => ({ ...p, phone: val })); }}
                                             placeholder="(11) 99999-9999"
                                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                                     </div>
@@ -662,7 +695,7 @@ export default function Configuracoes() {
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Telefone</label>
-                                <input type="text" value={proForm.phone} onChange={e => setProForm(p => ({ ...p, phone: e.target.value }))}
+                                <input type="text" value={proForm.phone} onChange={e => { let val = e.target.value.replace(/\D/g, ''); if (val.length > 11) val = val.slice(0, 11); if (val.length > 7) { val = `(${val.slice(0,2)}) ${val.slice(2,7)}-${val.slice(7)}`; } else if (val.length > 2) { val = `(${val.slice(0,2)}) ${val.slice(2)}`; } setProForm(p => ({ ...p, phone: val })); }}
                                     placeholder="(11) 99999-9999"
                                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 transition-colors" />
                             </div>

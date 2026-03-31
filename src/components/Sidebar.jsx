@@ -211,8 +211,26 @@ export default function Sidebar() {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onloadend = () => {
-            setEditForm(prev => ({ ...prev, photo: reader.result }));
+        reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                const MAX = 200;
+                if (width > height) {
+                    if (width > MAX) { height *= MAX / width; width = MAX; }
+                } else {
+                    if (height > MAX) { width *= MAX / height; height = MAX; }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                setEditForm(prev => ({ ...prev, photo: canvas.toDataURL('image/jpeg', 0.8) }));
+                e.target.value = '';
+            };
+            img.src = event.target.result;
         };
         reader.readAsDataURL(file);
     };
@@ -388,7 +406,7 @@ export default function Sidebar() {
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">WhatsApp</label>
-                                <input type="text" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} placeholder="(11) 99999-9999" className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-red-500" />
+                                <input type="text" value={editForm.phone} onChange={e => { let val = e.target.value.replace(/\D/g, ''); if (val.length > 11) val = val.slice(0, 11); if (val.length > 7) { val = `(${val.slice(0,2)}) ${val.slice(2,7)}-${val.slice(7)}`; } else if (val.length > 2) { val = `(${val.slice(0,2)}) ${val.slice(2)}`; } setEditForm({ ...editForm, phone: val }); }} placeholder="(11) 99999-9999" className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-red-500" />
                             </div>
                             <div>
                                 <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Foto de Perfil</label>

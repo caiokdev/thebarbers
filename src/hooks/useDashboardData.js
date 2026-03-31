@@ -353,6 +353,15 @@ export default function useDashboardData() {
                         .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
                 }
 
+                // Recalculatar Atendimentos Hoje localmente para garantir consistência visual
+                atendimentosHojeClosed = detalheAtendimentosHoje.length;
+                const totalAgendadosLocais = allOrdersRaw.filter(o => {
+                    const isScheduledToday = o.scheduled_at && getLocalDateISO(openDateSafely(o.scheduled_at)) === todayStr;
+                    const isClosedToday = o.closed_at && getLocalDateISO(openDateSafely(o.closed_at)) === todayStr;
+                    return isScheduledToday || isClosedToday;
+                }).length;
+                atendimentosHojeTotal = Math.max(summaryData?.today?.totalHoje || 0, totalAgendadosLocais, atendimentosHojeClosed);
+
                 // Meta Mensal Map
                 const detalheMetaMes = Object.entries(dailyMetaMap).map(([dayKey, total]) => {
                     return {

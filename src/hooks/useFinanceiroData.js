@@ -310,8 +310,11 @@ export function useFinanceiroData() {
             let alreadyPaidCommission = paidTotal * (rate / 100);
             if (remainingCommission < 0.01) remainingCommission = 0;
 
+            const valorComissaoTotal = unpaidTotal * (rate / 100) + paidTotal * (rate / 100);
+
             return {
                 id, nome: v.nome, totalGerado: v.total, rate, 
+                valorComissaoTotal,
                 valorComissao: remainingCommission, valorPago: alreadyPaidCommission,
                 orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)),
                 unpaidOrders
