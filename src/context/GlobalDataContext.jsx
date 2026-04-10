@@ -33,8 +33,8 @@ export function GlobalDataProvider({ children }) {
             const [adminRes, clientsRes, prosRes, profilesProsRes, servicesRes, productsRes, bhRes, plansRes] = await Promise.all([
                 supabase.from('profiles').select('name').eq('barbershop_id', bId).eq('role', 'admin').limit(1).maybeSingle(),
                 supabase.from('clients').select('id, name, phone, is_subscriber, subscription_status, birth_date').eq('barbershop_id', bId),
-                supabase.from('professionals').select('id, name, specialty, commission_rate').eq('barbershop_id', bId).eq('role', 'barber'),
-                supabase.from('profiles').select('id, name, specialty, commission_rate').eq('barbershop_id', bId).eq('role', 'barber'),
+                supabase.from('professionals').select('id, name, specialty').eq('barbershop_id', bId).eq('role', 'barber'),
+                supabase.from('profiles').select('id, name, commission_rate').eq('barbershop_id', bId).eq('role', 'barber'),
                 supabase.from('services').select('id, name, price').eq('barbershop_id', bId),
                 supabase.from('products').select('id, name, price, current_stock').eq('barbershop_id', bId),
                 supabase.from('business_hours').select('*').eq('barbershop_id', bId),

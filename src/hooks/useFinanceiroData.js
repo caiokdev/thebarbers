@@ -213,7 +213,7 @@ export function useFinanceiroData() {
             if (proIds.length > 0) {
                 // Fetch from both tables to bypass potential RLS blocks on either side
                 const [prosRes, profilesProsRes] = await Promise.all([
-                    supabase.from('professionals').select('id, name, commission_rate').in('id', proIds),
+                    supabase.from('professionals').select('id, name').in('id', proIds),
                     supabase.from('profiles').select('id, name, commission_rate').in('id', proIds)
                 ]);
                 
