@@ -535,9 +535,9 @@ function AppointmentModal({
     const [showPlanWarningModal, setShowPlanWarningModal] = useState(false);
 
     const filteredClients = useMemo(() => {
-        if (!clientSearch.trim()) return clients.slice(0, 8);
+        if (!clientSearch.trim()) return clients;
         const q = clientSearch.toLowerCase();
-        return clients.filter(c => c.name?.toLowerCase().includes(q)).slice(0, 8);
+        return clients.filter(c => c.name?.toLowerCase().includes(q));
     }, [clientSearch, clients]);
 
     useEffect(() => {

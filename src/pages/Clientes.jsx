@@ -377,6 +377,21 @@ export default function Clientes() {
         return result;
     }, [clientesLista, searchTerm, statusFilter]);
 
+    // ── Pagination ──
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 15;
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, statusFilter]);
+
+    const paginatedClientes = useMemo(() => {
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        return filteredClientes.slice(startIndex, startIndex + itemsPerPage);
+    }, [filteredClientes, currentPage]);
+
+    const totalPages = Math.ceil(filteredClientes.length / itemsPerPage);
+
     // ── Export ──
     const handleExportExcel = () => {
         const data = filteredClientes.map(c => ({
@@ -523,7 +538,7 @@ export default function Clientes() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-700/50">
-                                {filteredClientes.map((c) => (
+                                {paginatedClientes.map((c) => (
                                     <tr key={c.id} className="hover:bg-slate-700/30 transition-colors">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
@@ -580,6 +595,29 @@ export default function Clientes() {
                             </div>
                         )}
                     </div>
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="flex items-center justify-between bg-slate-800 border border-slate-700 p-4 rounded-2xl shadow-sm">
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className="px-4 py-2 bg-slate-700 text-slate-300 rounded-xl text-sm font-semibold hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Anterior
+                            </button>
+                            <span className="text-slate-400 text-sm font-medium">
+                                Página <span className="text-white font-bold">{currentPage}</span> de <span className="text-white font-bold">{totalPages}</span>
+                            </span>
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                                className="px-4 py-2 bg-slate-700 text-slate-300 rounded-xl text-sm font-semibold hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Próxima
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* ── MODAL: NOVO CLIENTE ── */}

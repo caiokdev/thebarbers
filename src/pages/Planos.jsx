@@ -929,7 +929,7 @@ export default function Planos() {
                                 />
                                 {showClientDropdown && !selectedClient && (
                                     <div className="absolute z-[70] w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-y-auto max-h-48">
-                                        {allClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).slice(0, 10).map(c => (
+                                        {allClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c => (
                                             <button key={c.id} onClick={() => { setSelectedClient(c); setClientSearch(c.name); setShowClientDropdown(false); }} className="w-full text-left px-4 py-3 hover:bg-slate-700 border-b border-slate-700/50 last:border-none flex items-center justify-between">
                                                 <div>
                                                     <p className="text-sm font-semibold text-slate-200">{c.name}</p>
