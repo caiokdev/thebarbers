@@ -929,7 +929,26 @@ export default function Planos() {
                                 />
                                 {showClientDropdown && !selectedClient && (
                                     <div className="absolute z-[70] w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-y-auto max-h-48">
-                                        {allClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c => (
+                                        {allClients.filter(c => (c.name || '').toLowerCase().includes(clientSearch.toLowerCase())).sort((a, b) => {
+                                            const q = clientSearch.toLowerCase();
+                                            const aName = (a.name || '').toLowerCase();
+                                            const bName = (b.name || '').toLowerCase();
+                                            
+                                            const aStarts = aName.startsWith(q);
+                                            const bStarts = bName.startsWith(q);
+                                            if (aStarts && !bStarts) return -1;
+                                            if (!aStarts && bStarts) return 1;
+                                            
+                                            const aWordStarts = aName.includes(' ' + q);
+                                            const bWordStarts = bName.includes(' ' + q);
+                                            if (aWordStarts && !bWordStarts) return -1;
+                                            if (!aWordStarts && bWordStarts) return 1;
+                                            
+                                            const aIndex = aName.indexOf(q);
+                                            const bIndex = bName.indexOf(q);
+                                            if (aIndex !== -1 && bIndex !== -1 && aIndex !== bIndex) return aIndex - bIndex;
+                                            return aName.localeCompare(bName);
+                                        }).map(c => (
                                             <button key={c.id} onClick={() => { setSelectedClient(c); setClientSearch(c.name); setShowClientDropdown(false); }} className="w-full text-left px-4 py-3 hover:bg-slate-700 border-b border-slate-700/50 last:border-none flex items-center justify-between">
                                                 <div>
                                                     <p className="text-sm font-semibold text-slate-200">{c.name}</p>

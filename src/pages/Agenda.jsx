@@ -537,7 +537,26 @@ function AppointmentModal({
     const filteredClients = useMemo(() => {
         if (!clientSearch.trim()) return clients;
         const q = clientSearch.toLowerCase();
-        return clients.filter(c => c.name?.toLowerCase().includes(q));
+        return clients.filter(c => c.name?.toLowerCase().includes(q))
+            .sort((a, b) => {
+                const aName = (a.name || '').toLowerCase();
+                const bName = (b.name || '').toLowerCase();
+                
+                const aStarts = aName.startsWith(q);
+                const bStarts = bName.startsWith(q);
+                if (aStarts && !bStarts) return -1;
+                if (!aStarts && bStarts) return 1;
+                
+                const aWordStarts = aName.includes(' ' + q);
+                const bWordStarts = bName.includes(' ' + q);
+                if (aWordStarts && !bWordStarts) return -1;
+                if (!aWordStarts && bWordStarts) return 1;
+                
+                const aIndex = aName.indexOf(q);
+                const bIndex = bName.indexOf(q);
+                if (aIndex !== -1 && bIndex !== -1 && aIndex !== bIndex) return aIndex - bIndex;
+                return aName.localeCompare(bName);
+            });
     }, [clientSearch, clients]);
 
     useEffect(() => {

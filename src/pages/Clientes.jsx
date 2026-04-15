@@ -370,7 +370,30 @@ export default function Clientes() {
         let result = [...clientesLista];
         if (searchTerm) {
             const low = searchTerm.toLowerCase();
-            result = result.filter(c => c.name.toLowerCase().includes(low) || c.phone.includes(low));
+            result = result.filter(c => (c.name || '').toLowerCase().includes(low) || (c.phone || '').includes(low));
+            result.sort((a, b) => {
+                const aName = (a.name || '').toLowerCase();
+                const bName = (b.name || '').toLowerCase();
+                
+                const aStarts = aName.startsWith(low);
+                const bStarts = bName.startsWith(low);
+                if (aStarts && !bStarts) return -1;
+                if (!aStarts && bStarts) return 1;
+                
+                const aWordStarts = aName.includes(' ' + low);
+                const bWordStarts = bName.includes(' ' + low);
+                if (aWordStarts && !bWordStarts) return -1;
+                if (!aWordStarts && bWordStarts) return 1;
+                
+                const aIndex = aName.indexOf(low);
+                const bIndex = bName.indexOf(low);
+                if (aIndex !== -1 && bIndex !== -1 && aIndex !== bIndex) return aIndex - bIndex;
+                
+                if (aIndex === -1 && bIndex !== -1) return 1;
+                if (aIndex !== -1 && bIndex === -1) return -1;
+                
+                return aName.localeCompare(bName);
+            });
         }
         if (statusFilter === 'sub') result = result.filter(c => c.isSubscriber);
         if (statusFilter === 'free') result = result.filter(c => !c.isSubscriber);
