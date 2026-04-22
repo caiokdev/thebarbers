@@ -308,11 +308,7 @@ export function useFinanceiroData() {
             const pid = o.professional_id;
             if (!pid) return;
             if (!grouped[pid]) grouped[pid] = { nome: o.professionals?.name || proMapState[pid] || 'Sem nome', total: 0, orders: [], cortesPlano: 0, barbasPlano: 0 };
-            grouped[pid].total += o.total_amount;
-            grouped[pid].orders.push({
-                ...o,
-                cliente: clientMapState[o.client_id] || 'Cliente Avulso',
-            });
+            let simulatedTotal = parseFloat(o.total_amount || 0);
 
             // Parse Plan items separately
             (o.order_items || []).forEach(item => {
@@ -321,14 +317,20 @@ export function useFinanceiroData() {
                     if (nameStr.includes('corte') || nameStr.includes('cabelo')) {
                         const qtd = (item.quantity || 1);
                         grouped[pid].cortesPlano += qtd;
-                        grouped[pid].total += (planConfig.corte || 0) * qtd;
+                        simulatedTotal += (planConfig.corte || 0) * qtd;
                     }
                     if (nameStr.includes('barba')) {
                         const qtd = (item.quantity || 1);
                         grouped[pid].barbasPlano += qtd;
-                        grouped[pid].total += (planConfig.barba || 0) * qtd;
+                        simulatedTotal += (planConfig.barba || 0) * qtd;
                     }
                 }
+            });
+            grouped[pid].total += simulatedTotal;
+            grouped[pid].orders.push({
+                ...o,
+                total_amount: simulatedTotal,
+                cliente: clientMapState[o.client_id] || 'Cliente Avulso',
             });
         });
 
