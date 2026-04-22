@@ -46,7 +46,8 @@ export default function Financeiro() {
         pedidosHoje, pedidos7Dias, pedidosMes, listaAssinantes,
         periodoComissao, setPeriodoComissao,
         comissoesPorBarbeiro,
-        addExpense, verifyPassword, updateCommissionRate, payCommission
+        addExpense, verifyPassword, updateCommissionRate, payCommission,
+        planConfig, updatePlanConfig
     } = useFinanceiroData();
 
     // ── Local UI States ──
@@ -61,6 +62,11 @@ export default function Financeiro() {
     const [expenseAmount, setExpenseAmount] = useState('');
     const [expenseDesc, setExpenseDesc] = useState('');
     const [savingExpense, setSavingExpense] = useState(false);
+
+    // Plan Configuration Modal
+    const [isPlanConfigModalOpen, setIsPlanConfigModalOpen] = useState(false);
+    const [planCutInput, setPlanCutInput] = useState('');
+    const [planShaveInput, setPlanShaveInput] = useState('');
 
     const [detailsModalOpen, setDetailsModalOpen] = useState(false);
     const [detailsModalConfig, setDetailsModalConfig] = useState({ title: '', data: [], type: '' });
@@ -88,6 +94,18 @@ export default function Financeiro() {
         } finally {
             setSavingExpense(false);
         }
+    }
+
+    function handleSavePlanConfig() {
+        const cVal = parseFloat(planCutInput);
+        const bVal = parseFloat(planShaveInput);
+        if (isNaN(cVal) || isNaN(bVal) || cVal < 0 || bVal < 0) {
+            toast.error('Informe valores válidos.');
+            return;
+        }
+        updatePlanConfig({ corte: cVal, barba: bVal });
+        setIsPlanConfigModalOpen(false);
+        toast.success('Valores dos planos atualizados!');
     }
 
     async function handleUnlock() {
@@ -526,17 +544,35 @@ export default function Financeiro() {
                                     ) : (
                                         <div>
                                             {/* Period filter */}
-                                            <div className="flex gap-1.5 mb-4">
-                                                {[{ k: 'hoje', l: 'Hoje' }, { k: 'semana', l: 'Esta Semana' }, { k: 'mes', l: 'Este Mês' }]
-                                                    .filter(p => isCurrentMonth ? true : p.k === 'mes') // Hide hoje/semana for past months
-                                                    .map(p => (
-                                                        <button key={p.k} onClick={() => setPeriodoComissao(p.k)}
-                                                            className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${periodoComissao === p.k
-                                                                ? 'bg-red-600/20 text-red-500 border border-red-600/30'
-                                                                : 'bg-slate-900/50 text-slate-500 border border-slate-700/30 hover:text-slate-300'
-                                                                }`}
-                                                        >{isCurrentMonth ? p.l : 'Mês Selecionado'}</button>
-                                                    ))}
+                                            <div className="flex items-center justify-between mb-4">
+                                                <div className="flex gap-1.5 flex-1">
+                                                    {[{ k: 'hoje', l: 'Hoje' }, { k: 'semana', l: 'Esta Semana' }, { k: 'mes', l: 'Este Mês' }]
+                                                        .filter(p => isCurrentMonth ? true : p.k === 'mes') // Hide hoje/semana for past months
+                                                        .map(p => (
+                                                            <button key={p.k} onClick={() => setPeriodoComissao(p.k)}
+                                                                className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${periodoComissao === p.k
+                                                                    ? 'bg-red-600/20 text-red-500 border border-red-600/30'
+                                                                    : 'bg-slate-900/50 text-slate-500 border border-slate-700/30 hover:text-slate-300'
+                                                                    }`}
+                                                            >{isCurrentMonth ? p.l : 'Mês Selecionado'}</button>
+                                                        ))}
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        const pConfig = planConfig || {corte:0, barba:0};
+                                                        setPlanCutInput(pConfig.corte.toString());
+                                                        setPlanShaveInput(pConfig.barba.toString());
+                                                        setIsPlanConfigModalOpen(true);
+                                                    }}
+                                                    className="px-3 py-2 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all flex items-center gap-1.5 shadow-sm"
+                                                    title="Configurar valor pago pelos serviços do plano"
+                                                >
+                                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    </svg>
+                                                    Valores de Plano
+                                                </button>
                                             </div>
 
                                             {/* Barber list */}
@@ -565,6 +601,12 @@ export default function Financeiro() {
                                                                     <div className="flex flex-col gap-0.5">
                                                                         <span className="text-[11px] text-slate-500">Produção Bruta: {formatCurrency(b.totalGerado)}</span>
                                                                         <span className="text-[11px] text-slate-500">Comissão Total: {formatCurrency(b.valorComissaoTotal)}</span>
+                                                                        {(b.cortesPlano > 0 || b.barbasPlano > 0) && (
+                                                                            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1 mt-0.5" title="Serviços extras de assinantes do plano mensal que não geram valor de produção no PDV">
+                                                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                                                Planos: {b.cortesPlano > 0 ? `${b.cortesPlano} Corte(s)` : ''} {b.cortesPlano > 0 && b.barbasPlano > 0 ? '| ' : ''}{b.barbasPlano > 0 ? `${b.barbasPlano} Barba(s)` : ''}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
                                                                     <div className="flex items-center gap-1.5">
                                                                         {b.valorPago > 0 && (
@@ -1015,18 +1057,6 @@ export default function Financeiro() {
                                             </div>
                                         );
                                     })}
-
-                                    {detailsModalConfig.type === 'subscribers' && detailsModalConfig.data.map((item, i) => (
-                                        <div key={item.id || i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900/40 border border-slate-700/30">
-                                            <p className="text-sm text-slate-200 font-medium truncate">{item.cliente}</p>
-                                            <span
-                                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${item.status !== 'active' ? 'bg-red-600 text-white' : ''}`}
-                                                style={item.status === 'active' ? { background: '#111', color: '#fff', boxShadow: '0 0 0 1px rgba(181,148,16,0.5)' } : {}}
-                                            >
-                                                {item.status === 'active' ? '★ Em dia' : '⚠ Atrasado'}
-                                            </span>
-                                        </div>
-                                    ))}
                                 </div>
 
                                 {detailsModalConfig.type === 'orders' && detailsModalConfig.data.length > 0 && (
@@ -1041,6 +1071,68 @@ export default function Financeiro() {
                         </div>
                     )
                 }
+            {/* ════════════════ MODAL: PLAN PRICES CONFIG ════════════════ */}
+            {isPlanConfigModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setIsPlanConfigModalOpen(false)}></div>
+                    <div className="relative bg-slate-800 border border-slate-700 w-full max-w-sm rounded-2xl shadow-xl p-6">
+                        <div className="flex items-center gap-3 mb-5">
+                            <div className="w-10 h-10 bg-emerald-500/15 rounded-xl flex items-center justify-center">
+                                <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-100">Valores de Plano</h3>
+                                <p className="text-[11px] text-slate-500">Defina o valor pago por serviço</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Valor por Corte (R$)</label>
+                                <input 
+                                    type="number" 
+                                    min="0"
+                                    step="0.01"
+                                    value={planCutInput}
+                                    onChange={(e) => setPlanCutInput(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-medium"
+                                    placeholder="Ex: 10.00"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Valor por Barba (R$)</label>
+                                <input 
+                                    type="number" 
+                                    min="0"
+                                    step="0.01"
+                                    value={planShaveInput}
+                                    onChange={(e) => setPlanShaveInput(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all font-medium"
+                                    placeholder="Ex: 5.00"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-6">
+                            <button
+                                onClick={() => setIsPlanConfigModalOpen(false)}
+                                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleSavePlanConfig}
+                                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-500/20"
+                            >
+                                Salvar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
                 {
                     confirmModal.open && (
                         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">

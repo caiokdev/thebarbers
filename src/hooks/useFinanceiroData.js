@@ -46,6 +46,25 @@ export function useFinanceiroData() {
 
     // Commissions UI State
     const [periodoComissao, setPeriodoComissao] = useState('mes');
+    
+    // Plan values
+    const [planConfig, setPlanConfig] = useState({ corte: 0, barba: 0 });
+
+    useEffect(() => {
+        if (barbershopId) {
+            const stored = localStorage.getItem(`plan_config_${barbershopId}`);
+            if (stored) {
+                try { setPlanConfig(JSON.parse(stored)); } catch(e){}
+            }
+        }
+    }, [barbershopId]);
+
+    const updatePlanConfig = useCallback((newConfig) => {
+        setPlanConfig(newConfig);
+        if (barbershopId) {
+            localStorage.setItem(`plan_config_${barbershopId}`, JSON.stringify(newConfig));
+        }
+    }, [barbershopId]);
 
     // Dates calculations memoized to stabilize fetchAll dependencies
     const {
@@ -288,11 +307,28 @@ export function useFinanceiroData() {
         filteredOrders.forEach(o => {
             const pid = o.professional_id;
             if (!pid) return;
-            if (!grouped[pid]) grouped[pid] = { nome: o.professionals?.name || proMapState[pid] || 'Sem nome', total: 0, orders: [] };
+            if (!grouped[pid]) grouped[pid] = { nome: o.professionals?.name || proMapState[pid] || 'Sem nome', total: 0, orders: [], cortesPlano: 0, barbasPlano: 0 };
             grouped[pid].total += o.total_amount;
             grouped[pid].orders.push({
                 ...o,
                 cliente: clientMapState[o.client_id] || 'Cliente Avulso',
+            });
+
+            // Parse Plan items separately
+            (o.order_items || []).forEach(item => {
+                const nameStr = (item.name || '').toLowerCase();
+                if (nameStr.includes('(plano)') || nameStr.includes('do plano')) {
+                    if (nameStr.includes('corte') || nameStr.includes('cabelo')) {
+                        const qtd = (item.quantity || 1);
+                        grouped[pid].cortesPlano += qtd;
+                        grouped[pid].total += (planConfig.corte || 0) * qtd;
+                    }
+                    if (nameStr.includes('barba')) {
+                        const qtd = (item.quantity || 1);
+                        grouped[pid].barbasPlano += qtd;
+                        grouped[pid].total += (planConfig.barba || 0) * qtd;
+                    }
+                }
             });
         });
 
@@ -316,6 +352,8 @@ export function useFinanceiroData() {
                 id, nome: v.nome, totalGerado: v.total, rate, 
                 valorComissaoTotal,
                 valorComissao: remainingCommission, valorPago: alreadyPaidCommission,
+                cortesPlano: v.cortesPlano,
+                barbasPlano: v.barbasPlano,
                 orders: v.orders.sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)),
                 unpaidOrders
             };
@@ -393,6 +431,7 @@ export function useFinanceiroData() {
         periodoComissao, setPeriodoComissao,
         comissoesPorBarbeiro,
         
-        addExpense, verifyPassword, updateCommissionRate, payCommission
+        addExpense, verifyPassword, updateCommissionRate, payCommission,
+        planConfig, updatePlanConfig
     };
 }
